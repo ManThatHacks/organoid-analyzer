@@ -1,0 +1,6 @@
+# cmd.exe needs CRLF line endings in batch files; with LF they fail silently.
+*.bat  text eol=crlf
+*.py   text eol=lf
+*.html text eol=lf
+*.md   text eol=lf
+*.png  binary

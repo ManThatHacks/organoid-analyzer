@@ -1,0 +1,2095 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Organoid Editor</title>
+<style>
+:root {
+  --bg: #16181c; --panel: #1f2228; --panel2: #262a31; --line: #343943;
+  --text: #e6e8eb; --muted: #9aa1ab; --accent: #4c9bff; --danger: #ff5a52;
+  --ok: #3ccb6a; --warn: #ffa31a;
+  --c-original: #ff3b30; --c-modified: #ff9f0a; --c-added: #34c759; --c-selected: #ffffff;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+  font: 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+button, input, select { font: inherit; color: inherit; }
+button { background: var(--panel2); border: 1px solid var(--line); border-radius: 6px;
+  padding: 5px 10px; cursor: pointer; }
+button:hover:not(:disabled) { border-color: #4a515d; background: #2d323a; }
+button:disabled { opacity: .45; cursor: default; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary:hover:not(:disabled) { background: #3d8af0; }
+input[type=number], select { background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; }
+input[type=range] { width: 100%; accent-color: var(--accent); }
+kbd { font: 11px ui-monospace, Consolas, monospace; background: var(--panel2); border: 1px solid var(--line);
+  border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; }
+.muted { color: var(--muted); }
+.hidden { display: none !important; }
+
+/* ---------- start screen ---------- */
+#start { position: fixed; inset: 0; display: grid; place-items: center; padding: 16px; overflow: auto; }
+#start .card { width: min(640px, 100%); background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 24px; }
+#start h1 { margin: 0 0 4px; font-size: 20px; }
+#drop { margin: 18px 0; border: 2px dashed var(--line); border-radius: 10px; padding: 22px; text-align: center; transition: border-color .15s, background .15s; }
+#drop.over { border-color: var(--accent); background: rgba(76,155,255,.07); }
+.slots { display: grid; gap: 6px; margin: 14px 0 18px; }
+.slot { display: flex; align-items: center; gap: 10px; background: var(--panel2); border-radius: 8px; padding: 8px 10px; }
+.slot .dot { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--line); flex: none; display: grid; place-items: center; font-size: 11px; }
+.slot.ok .dot { background: var(--ok); border-color: var(--ok); color: #0b1a10; }
+.slot .name { font-weight: 600; min-width: 104px; }
+.slot .file { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+.slot button { flex: none; padding: 2px 8px; font-size: 12px; }
+#dropReport { font-size: 12px; margin: -8px 0 14px; max-height: 120px; overflow: auto; }
+#dropReport .fname { font-family: ui-monospace, Consolas, monospace; }
+.warn { color: var(--warn); }
+body.dragging #app::after { content: "Drop a mask, image or results folder to load it"; position: fixed; inset: 46px 310px 26px 52px;
+  display: grid; place-items: center; background: rgba(76,155,255,.12); border: 2px dashed var(--accent);
+  font-size: 16px; font-weight: 600; pointer-events: none; z-index: 5; }
+body.dragging #drop { border-color: var(--accent); background: rgba(76,155,255,.07); }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+#startMsg { min-height: 20px; margin-top: 10px; }
+.err { color: var(--danger); }
+
+/* ---------- editor layout ---------- */
+#app { position: fixed; inset: 0; display: grid; grid-template-rows: 46px 1fr 26px; grid-template-columns: 52px 1fr 310px; }
+header { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; padding: 0 10px; background: var(--panel); border-bottom: 1px solid var(--line); min-width: 0; }
+header .title { font-weight: 650; white-space: nowrap; }
+header .file { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+header label { display: flex; align-items: center; gap: 6px; white-space: nowrap; color: var(--muted); }
+header input[type=number] { width: 78px; }
+#tools { background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 0; }
+#tools button { width: 38px; height: 38px; padding: 0; display: grid; place-items: center; border-color: transparent; background: transparent; position: relative; }
+#tools button.on { background: rgba(76,155,255,.18); border-color: var(--accent); }
+#tools button svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+#tools .sep { width: 28px; height: 1px; background: var(--line); margin: 4px 0; }
+#stage { position: relative; overflow: hidden; background: #0d0e10; }
+#view { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; }
+#toolHint { position: absolute; left: 10px; top: 10px; background: rgba(22,24,28,.88); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; pointer-events: none; max-width: calc(100% - 20px); }
+#toolOpts { position: absolute; left: 10px; bottom: 10px; background: rgba(22,24,28,.92); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; max-width: calc(100% - 20px); }
+#toolOpts label { display: flex; gap: 6px; align-items: center; white-space: nowrap; }
+#toolOpts input[type=range] { width: 120px; }
+aside { background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; min-width: 0; }
+aside section { border-bottom: 1px solid var(--line); padding: 12px; }
+aside h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 8px; font-weight: 650; }
+table.kv { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+table.kv td { padding: 2px 0; }
+table.kv td:last-child { text-align: right; }
+.badge { display: inline-block; border-radius: 4px; padding: 0 6px; font-size: 11px; font-weight: 650; color: #111; }
+.b-original { background: var(--c-original); color: #fff; } .b-modified { background: var(--c-modified); } .b-added { background: var(--c-added); }
+.legend { display: grid; grid-template-columns: auto 1fr; gap: 3px 8px; align-items: center; margin-top: 8px; }
+.sw { width: 14px; height: 3px; border-radius: 2px; }
+.ctl { display: grid; grid-template-columns: 1fr auto; gap: 6px 10px; align-items: center; }
+#list { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+#list th { text-align: left; color: var(--muted); font-weight: 600; font-size: 11px; position: sticky; top: 0; background: var(--panel); padding: 4px 2px; }
+#list td { padding: 3px 2px; border-top: 1px solid #2a2e35; }
+#list tr { cursor: pointer; }
+#list tr:hover td { background: #2a2f37; }
+#list tr.sel td { background: rgba(76,155,255,.2); }
+#list tr.filtered td { opacity: .45; text-decoration: line-through; }
+#list td.num { text-align: right; }
+#listWrap { max-height: 340px; overflow: auto; }
+footer { grid-column: 1 / -1; display: flex; gap: 18px; align-items: center; padding: 0 10px; background: var(--panel); border-top: 1px solid var(--line); color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; }
+#toast { position: fixed; left: 50%; bottom: 40px; transform: translateX(-50%); background: #2d323a; border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 10; max-width: 90vw; }
+#toast.show { opacity: 1; }
+#toast.bad { border-color: var(--danger); }
+body.session .solo-only, body:not(.session) .sess-only { display: none !important; }
+#sessListWrap { max-height: 240px; overflow: auto; }
+#sessList { width: 100%; border-collapse: collapse; }
+#sessList td { padding: 4px 4px; border-top: 1px solid #2a2e35; white-space: nowrap; }
+#sessList td.nm { overflow: hidden; text-overflow: ellipsis; max-width: 150px; }
+#sessList td.num { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+#sessList tr { cursor: pointer; }
+#sessList tr:hover td { background: #2a2f37; }
+#sessList tr.cur td { background: rgba(76,155,255,.2); }
+.tick { color: var(--ok); font-weight: 700; }
+.err-dot { color: var(--danger); }
+#exportDlg { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: grid; place-items: center; z-index: 20; padding: 16px; }
+#exportDlg .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 20px 24px; width: min(560px, 100%); }
+#exportDlg a { color: var(--accent); }
+#exportDlg code { word-break: break-all; }
+#help { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: grid; place-items: center; z-index: 20; padding: 16px; }
+#help .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 20px 24px; width: min(620px, 100%); max-height: 90vh; overflow: auto; }
+#help table { border-collapse: collapse; width: 100%; }
+#help td { padding: 4px 6px; vertical-align: top; }
+#help td:first-child { white-space: nowrap; }
+@media (max-width: 900px) {
+  #app { grid-template-columns: 52px 1fr; grid-template-rows: 46px 1fr 40vh 26px; }
+  aside { grid-column: 1 / -1; border-left: none; border-top: 1px solid var(--line); }
+  header label.um span { display: none; }
+}
+</style>
+</head>
+<body>
+
+<!-- ======================= start screen ======================= -->
+<div id="start">
+  <div class="card">
+    <h1>Organoid editor</h1>
+    <div class="muted">Review and correct the output of <code>organoid_quant.py</code> or
+      <code>organoid_quant_skimage.py</code>. Everything runs in this browser tab; no file leaves your computer.</div>
+    <div id="drop">
+      <div style="font-weight:600;margin-bottom:6px">Drop the well image and a mask (or a whole results folder) here</div>
+      <div class="muted" style="margin-bottom:12px">or choose them:</div>
+      <div class="row" style="justify-content:center">
+        <button id="pickImage">Image…</button>
+        <button id="pickFolder">Results folder…</button>
+        <button id="pickFiles">Individual files…</button>
+      </div>
+      <input id="inImage" type="file" accept="image/*,.tif,.tiff" class="hidden">
+      <input id="inFolder" type="file" webkitdirectory multiple class="hidden">
+      <input id="inFiles" type="file" multiple accept="image/*,.png,.tif,.tiff,.csv,.json" class="hidden">
+    </div>
+    <div class="slots">
+      <div class="slot" id="slot-image" data-empty="required · JPG, PNG or TIFF"><span class="dot"></span><span class="name">Well image</span><span class="file"></span><button id="slotBtn-image">Choose…</button><input id="slotIn-image" type="file" accept="image/*,.tif,.tiff" class="hidden"></div>
+      <div class="slot" id="slot-mask" data-empty="optional · label, black/white or colour mask (PNG or TIFF); without one you start empty"><span class="dot"></span><span class="name">Mask</span><span class="file"></span><button id="slotBtn-mask">Choose…</button><input id="slotIn-mask" type="file" accept=".png,.tif,.tiff" class="hidden"></div>
+      <div class="slot" id="slot-csv" data-empty="optional · organoids.csv, keeps the pipeline's exact numbers"><span class="dot"></span><span class="name">Measurements</span><span class="file"></span><button id="slotBtn-csv">Choose…</button><input id="slotIn-csv" type="file" accept=".csv" class="hidden"></div>
+      <div class="slot" id="slot-summary" data-empty="optional · summary.json, field-of-view area and scale"><span class="dot"></span><span class="name">Summary</span><span class="file"></span><button id="slotBtn-summary">Choose…</button><input id="slotIn-summary" type="file" accept=".json" class="hidden"></div>
+    </div>
+    <div id="dropReport"></div>
+    <div class="row" style="justify-content:space-between">
+      <button id="clearFiles">Clear</button>
+      <button id="openEditor" class="primary" disabled>Open editor</button>
+    </div>
+    <div id="startMsg" class="muted"></div>
+  </div>
+</div>
+
+<!-- ======================= editor ======================= -->
+<div id="app" class="hidden">
+  <header>
+    <span class="title">Organoid editor</span>
+    <span class="file" id="hdrFile"></span>
+    <label class="um" title="Micrometres per pixel. Leave empty to report pixels only."><span>µm / px</span><input id="umpx" type="number" min="0" step="0.001" placeholder="none"></label>
+    <button id="btnUndo" title="Undo (Ctrl+Z)" disabled>Undo</button>
+    <button id="btnRedo" title="Redo (Ctrl+Y)" disabled>Redo</button>
+    <button id="btnSave" class="primary solo-only" title="Write the corrected results into a folder (Ctrl+S)">Save to folder…</button>
+    <button id="btnZip" class="solo-only" title="Download the corrected results as a .zip">Download .zip</button>
+    <button id="btnSessSave" class="sess-only" title="Save this image's corrections into the results folder (Ctrl+S)">Save</button>
+    <button id="btnSaveNext" class="primary sess-only" title="Save, mark as reviewed and open the next image (Ctrl+Enter)">Save &amp; next ▸</button>
+    <button id="btnExport" class="sess-only" title="Write all images' results as Excel and CSV into the results folder">Export Excel / CSV</button>
+    <button id="btnHelp" title="Shortcuts (?)">?</button>
+    <button id="btnClose" class="solo-only" title="Load another image">Close</button>
+  </header>
+
+  <nav id="tools">
+    <button data-tool="select" title="Select / pan (V)"><svg viewBox="0 0 24 24"><path d="M5 3l14 8-6 2-2 6z"/></svg></button>
+    <button data-tool="delete" title="Delete object (D)"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg></button>
+    <div class="sep"></div>
+    <button data-tool="circle" title="Add circle (C)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 9v6M9 12h6"/></svg></button>
+    <button data-tool="lasso" title="Add freehand outline (L)"><svg viewBox="0 0 24 24"><path d="M7 18c-3-2-4-6-1-9s9-4 12-1 1 8-4 9-6 0-7 1"/></svg></button>
+    <button data-tool="brush" title="Brush: grow an object (B)"><svg viewBox="0 0 24 24"><path d="M14 4l6 6-8 8H6v-6z"/></svg></button>
+    <button data-tool="eraser" title="Eraser (E)"><svg viewBox="0 0 24 24"><path d="M15 4l5 5-9 9H6l-2-2z M10 9l5 5"/></svg></button>
+    <div class="sep"></div>
+    <button data-tool="merge" title="Merge objects (M)"><svg viewBox="0 0 24 24"><circle cx="9" cy="12" r="5"/><circle cx="15" cy="12" r="5"/></svg></button>
+    <button data-tool="split" title="Split object along a line (S)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M6 19L18 5"/></svg></button>
+  </nav>
+
+  <div id="stage">
+    <canvas id="view"></canvas>
+    <div id="toolHint"></div>
+    <div id="toolOpts">
+      <label id="optBrush">Brush <input id="brushSize" type="range" min="1" max="60" value="6"><span id="brushVal">6 px</span></label>
+      <label id="optOverwrite" title="When off, new shapes and brush strokes only fill empty pixels and never cut into neighbouring objects."><input id="overwrite" type="checkbox"> Overwrite neighbours</label>
+    </div>
+  </div>
+
+  <aside>
+    <section class="sess-only" id="sessPanel">
+      <h2>Images <span class="muted" id="sessProgress" style="text-transform:none;letter-spacing:0"></span></h2>
+      <div id="sessListWrap"><table id="sessList"><tbody></tbody></table></div>
+      <div class="row" style="margin-top:8px;justify-content:space-between">
+        <span class="row"><button id="sessPrev" title="Previous image (Alt+←)">◂</button><button id="sessNext" title="Next image (Alt+→)">▸</button></span>
+        <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="sessReviewed"> Reviewed</label>
+      </div>
+    </section>
+    <section>
+      <h2>Selected object</h2>
+      <div id="selInfo" class="muted">Click an object.</div>
+    </section>
+    <section>
+      <h2>Summary</h2>
+      <table class="kv" id="summary"></table>
+      <div class="legend">
+        <span class="sw" style="background:var(--c-original)"></span><span>original (pipeline numbers kept)</span>
+        <span class="sw" style="background:var(--c-modified)"></span><span>modified (re-measured here)</span>
+        <span class="sw" style="background:var(--c-added)"></span><span>added (measured here)</span>
+      </div>
+    </section>
+    <section>
+      <h2>Size &amp; quality filter</h2>
+      <div class="ctl"><span>Hide smaller than</span><span id="minDiamVal">off</span></div>
+      <input id="minDiam" type="range" min="0" max="60" step="1" value="0">
+      <div class="ctl" style="margin-top:6px"><span>Hide rim fainter than</span><span id="minRimVal">off</span></div>
+      <input id="minRim" type="range" min="0" max="30" step="0.5" value="0">
+      <div class="ctl" style="margin-top:9px">
+        <span title="On: the sliders keep their position when you open the next image.&#10;Off: they reset to zero for every image.">Keep setting for next images</span>
+        <input id="keepFilter" type="checkbox">
+      </div>
+      <div id="filterInfo" class="muted" style="margin-top:8px">Showing every object.</div>
+      <div class="row" style="margin-top:8px">
+        <button id="filterApply" disabled title="Delete the hidden objects in one undoable step">Delete hidden</button>
+        <button id="filterReset" title="Show everything again">Reset</button>
+      </div>
+    </section>
+    <section>
+      <h2>Display</h2>
+      <div class="ctl">
+        <span>Show objects <kbd>H</kbd></span><input id="showOverlay" type="checkbox" checked>
+        <span>Show IDs <kbd>I</kbd></span><input id="showIds" type="checkbox" checked>
+        <span>Enhance contrast</span><input id="enhance" type="checkbox" checked>
+        <span>Fill opacity</span><span></span>
+      </div>
+      <input id="fill" type="range" min="0" max="80" value="22">
+    </section>
+    <section>
+      <h2>Objects <span class="muted" style="text-transform:none;letter-spacing:0">· <kbd>N</kbd>/<kbd>P</kbd> step through</span></h2>
+      <div class="row" style="margin-bottom:6px">
+        <select id="listFilter">
+          <option value="all">All</option>
+          <option value="edited">Edited or added</option>
+          <option value="original">Original only</option>
+        </select>
+        <select id="listSort">
+          <option value="area">Largest first</option>
+          <option value="id">By ID</option>
+        </select>
+      </div>
+      <div id="listWrap"><table id="list"><thead><tr><th>ID</th><th class="num">Area px²</th><th>Status</th></tr></thead><tbody></tbody></table></div>
+    </section>
+  </aside>
+
+  <footer><button id="btnResetView" title="Redraw and re-centre the image (F)" style="padding:1px 8px;font-size:12px">Reset view</button><span id="stPos">–</span><span id="stObj"></span><span id="stZoom"></span><span id="stDirty"></span></footer>
+</div>
+
+<div id="help" class="hidden">
+  <div class="card">
+    <div class="row" style="justify-content:space-between"><h2 style="margin:0;font-size:16px">Shortcuts</h2><button id="helpClose">Close</button></div>
+    <table>
+      <tr><td><kbd>V</kbd></td><td>Select. Click an object to see its numbers; drag to pan.</td></tr>
+      <tr><td><kbd>D</kbd></td><td>Delete: click an object to remove it. <kbd>Del</kbd> removes the selected object with any tool.</td></tr>
+      <tr><td><kbd>C</kbd></td><td>Add circle: press at the centre, drag to the rim.</td></tr>
+      <tr><td><kbd>L</kbd></td><td>Add freehand: draw around the organoid and let go.</td></tr>
+      <tr><td><kbd>B</kbd></td><td>Brush: grows the object you start on (or the selected one). Starting on empty space with nothing selected makes a new object.</td></tr>
+      <tr><td><kbd>E</kbd></td><td>Eraser: removes pixels from any object.</td></tr>
+      <tr><td><kbd>M</kbd></td><td>Merge: click the object to keep, then each object to absorb into it. <kbd>Esc</kbd> to start over.</td></tr>
+      <tr><td><kbd>S</kbd></td><td>Split: drag a line across an object; each side becomes its own object.</td></tr>
+      <tr><td><kbd>[</kbd> <kbd>]</kbd></td><td>Brush size.</td></tr>
+      <tr><td>Wheel</td><td>Zoom at the cursor. Pan with right / middle drag, or hold <kbd>Space</kbd> and drag.</td></tr>
+      <tr><td><kbd>F</kbd> / <kbd>W</kbd></td><td>Fit the whole image / zoom to the analysed well (dashed yellow circle).</td></tr>
+      <tr><td><kbd>N</kbd> <kbd>P</kbd></td><td>Next / previous object in the list, zoomed in, for a systematic review.</td></tr>
+      <tr><td><kbd>H</kbd> <kbd>I</kbd></td><td>Hide objects (to see the raw image) / hide IDs.</td></tr>
+      <tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd></td><td>Undo / redo.</td></tr>
+      <tr><td><kbd>Ctrl</kbd>+<kbd>S</kbd></td><td>Save (into the results folder when opened by <code>batch_review.py</code>).</td></tr>
+      <tr><td><kbd>Ctrl</kbd>+<kbd>Enter</kbd></td><td>Batch review: save, mark as reviewed and open the next unreviewed image.</td></tr>
+      <tr><td><kbd>Alt</kbd>+<kbd>←</kbd> <kbd>→</kbd></td><td>Batch review: previous / next image (unsaved edits are saved first).</td></tr>
+    </table>
+    <p class="muted">On export, untouched organoids keep the pipeline's numbering order; gaps left by deletions are
+      closed and new objects are numbered last. <code>organoids.csv</code> gains
+      <code>status</code>, <code>source_id</code> (the pipeline ID) and <code>note</code> columns. Untouched organoids keep the
+      pipeline's exact values. Edited and added ones are measured here, so their rim columns are empty and their
+      axes come from image moments.</p>
+  </div>
+</div>
+
+<div id="exportDlg" class="hidden">
+  <div class="card">
+    <div class="row" style="justify-content:space-between"><h2 style="margin:0;font-size:16px">Exported</h2><button id="exportClose">Close</button></div>
+    <div id="exportBody" style="margin-top:10px"></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<!-- =====================================================================
+     core: file formats, label editing, measurement. No DOM access here.
+     ===================================================================== -->
+<script id="core">
+"use strict";
+
+// ---------------------------------------------------------------- bytes
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+function crc32(bytes, crc = 0) {
+  crc = ~crc >>> 0;
+  for (let i = 0; i < bytes.length; i++) crc = CRC_TABLE[(crc ^ bytes[i]) & 255] ^ (crc >>> 8);
+  return ~crc >>> 0;
+}
+async function streamBytes(u8, transform) {
+  const out = new Response(new Blob([u8]).stream().pipeThrough(transform));
+  return new Uint8Array(await out.arrayBuffer());
+}
+const zlibInflate = u8 => streamBytes(u8, new DecompressionStream("deflate"));
+const zlibDeflate = u8 => streamBytes(u8, new CompressionStream("deflate"));
+function concatBytes(parts) {
+  const n = parts.reduce((s, p) => s + p.length, 0), out = new Uint8Array(n);
+  let o = 0;
+  for (const p of parts) { out.set(p, o); o += p.length; }
+  return out;
+}
+
+// ---------------------------------------------------------------- PNG
+const PNG_SIG = [137, 80, 78, 71, 13, 10, 26, 10];
+async function decodePNG(buf) {
+  const b = new Uint8Array(buf), dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  for (let i = 0; i < 8; i++) if (b[i] !== PNG_SIG[i]) throw new Error("not a PNG file");
+  let p = 8, w = 0, h = 0, depth = 0, ctype = 0, interlace = 0;
+  const idat = [];
+  while (p < b.length) {
+    const len = dv.getUint32(p), type = String.fromCharCode(b[p + 4], b[p + 5], b[p + 6], b[p + 7]);
+    const data = b.subarray(p + 8, p + 8 + len);
+    if (type === "IHDR") {
+      w = dv.getUint32(p + 8); h = dv.getUint32(p + 12);
+      depth = b[p + 16]; ctype = b[p + 17]; interlace = b[p + 20];
+    } else if (type === "IDAT") idat.push(data);
+    else if (type === "IEND") break;
+    p += 12 + len;
+  }
+  const ch = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 }[ctype];
+  if (!ch) throw new Error("unsupported PNG colour type " + ctype);
+  if (![1, 2, 4, 8, 16].includes(depth)) throw new Error("unsupported PNG bit depth " + depth);
+  if (interlace) throw new Error("interlaced PNG is not supported; re-save it without interlacing");
+  const raw = await zlibInflate(concatBytes(idat));
+  const bpp = Math.max(1, (ch * depth) >> 3), stride = Math.ceil(w * ch * depth / 8);
+  if (raw.length < h * (stride + 1)) throw new Error("PNG data truncated");
+  const px = new Uint8Array(h * stride);
+  for (let y = 0; y < h; y++) {
+    const f = raw[y * (stride + 1)], src = y * (stride + 1) + 1, dst = y * stride;
+    for (let x = 0; x < stride; x++) {
+      const a = x >= bpp ? px[dst + x - bpp] : 0;
+      const up = y ? px[dst - stride + x] : 0;
+      const c = x >= bpp && y ? px[dst - stride + x - bpp] : 0;
+      let v = raw[src + x];
+      if (f === 1) v += a;
+      else if (f === 2) v += up;
+      else if (f === 3) v += (a + up) >> 1;
+      else if (f === 4) {
+        const pp = a + up - c, pa = Math.abs(pp - a), pb = Math.abs(pp - up), pc = Math.abs(pp - c);
+        v += pa <= pb && pa <= pc ? a : pb <= pc ? up : c;
+      } else if (f !== 0) throw new Error("bad PNG filter " + f);
+      px[dst + x] = v & 255;
+    }
+  }
+  // all samples as numbers (interleaved), plus the first channel on its own
+  let all;
+  if (depth === 16) {
+    all = new Uint16Array(w * h * ch);
+    for (let i = 0; i < all.length; i++) all[i] = (px[2 * i] << 8) | px[2 * i + 1];
+  } else if (depth === 8) all = px;
+  else {                                                  // 1/2/4-bit grey or palette
+    all = new Uint8Array(w * h);
+    const mask = (1 << depth) - 1;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const bit = x * depth;
+      all[y * w + x] = (px[y * stride + (bit >> 3)] >> (8 - depth - (bit & 7))) & mask;
+    }
+  }
+  let data = all;
+  if (ch > 1) { data = new all.constructor(w * h); for (let i = 0; i < w * h; i++) data[i] = all[i * ch]; }
+  return { w, h, depth, ctype, channels: ch, data, all };
+}
+
+// ---------------------------------------------------------------- TIFF (first page; strips; none / LZW / Deflate / PackBits)
+function lzwDecode(src, outLen) {
+  const out = new Uint8Array(outLen), pre = new Int32Array(4096), suf = new Uint8Array(4096), len = new Int32Array(4096);
+  for (let i = 0; i < 256; i++) { pre[i] = -1; suf[i] = i; len[i] = 1; }
+  const first = c => { while (pre[c] >= 0) c = pre[c]; return suf[c]; };
+  const write = code => {
+    const L = len[code];
+    for (let c = code, p = o + L - 1; c >= 0; c = pre[c], p--) if (p < outLen) out[p] = suf[c];
+    o += L;
+  };
+  let o = 0, bit = 0, n = 9, next = 258, prev = -1;
+  const total = src.length * 8;
+  while (bit + n <= total && o < outLen) {
+    let code = 0;
+    for (let k = 0; k < n; k++, bit++) code = (code << 1) | ((src[bit >> 3] >> (7 - (bit & 7))) & 1);
+    if (code === 257) break;
+    if (code === 256) { n = 9; next = 258; prev = -1; continue; }
+    if (prev < 0) { write(code); prev = code; continue; }
+    if (code < next) { write(code); pre[next] = prev; suf[next] = first(code); }
+    else { pre[next] = prev; suf[next] = first(prev); }
+    len[next] = len[prev] + 1;
+    if (code >= next) write(next);
+    next++; prev = code;
+    if (next + 1 >= 1 << n && n < 12) n++;               // TIFF "early change"
+  }
+  return out;
+}
+function packbitsDecode(src, outLen) {
+  const out = new Uint8Array(outLen);
+  for (let i = 0, o = 0; i < src.length && o < outLen;) {
+    const n = (src[i++] << 24) >> 24;
+    if (n >= 0) for (let k = 0; k <= n && o < outLen; k++) out[o++] = src[i++];
+    else if (n !== -128) { const v = src[i++]; for (let k = 0; k < 1 - n && o < outLen; k++) out[o++] = v; }
+  }
+  return out;
+}
+async function decodeTIFF(buf) {
+  const b = new Uint8Array(buf), dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  const le = b[0] === 0x49 && b[1] === 0x49;
+  if (!le && !(b[0] === 0x4d && b[1] === 0x4d)) throw new Error("not a TIFF file");
+  const magic = dv.getUint16(2, le);
+  if (magic === 43) throw new Error("BigTIFF is not supported; save as a standard TIFF or PNG");
+  if (magic !== 42) throw new Error("not a TIFF file");
+  const SIZE = { 1: 1, 2: 1, 3: 2, 4: 4, 6: 1, 8: 2, 9: 4, 16: 8 };
+  const ifd = dv.getUint32(4, le), n = dv.getUint16(ifd, le), tags = {};
+  for (let k = 0; k < n; k++) {
+    const e = ifd + 2 + 12 * k, tag = dv.getUint16(e, le), type = dv.getUint16(e + 2, le), count = dv.getUint32(e + 4, le);
+    const size = (SIZE[type] || 1) * count, at = size <= 4 ? e + 8 : dv.getUint32(e + 8, le), vals = [];
+    if (count > 1e6) continue;
+    for (let i = 0; i < count; i++) {
+      const p = at + i * (SIZE[type] || 1);
+      vals.push(type === 3 || type === 8 ? dv.getUint16(p, le) : type === 4 || type === 9 ? dv.getUint32(p, le) : b[p]);
+    }
+    tags[tag] = vals;
+  }
+  const W = tags[256][0], H = tags[257][0], bps = (tags[258] || [1])[0], comp = (tags[259] || [1])[0];
+  const spp = (tags[277] || [1])[0], planar = (tags[284] || [1])[0], pred = (tags[317] || [1])[0], sf = (tags[339] || [1])[0];
+  if (tags[322]) throw new Error("tiled TIFF is not supported; save as a standard (striped) TIFF or PNG");
+  if (![8, 16, 32].includes(bps)) throw new Error(bps + "-bit TIFF is not supported; save it as 8- or 16-bit");
+  if (spp > 1 && planar === 2) throw new Error("planar-configuration TIFF is not supported");
+  const bpsB = bps / 8, rowBytes = W * spp * bpsB, rps = (tags[278] || [H])[0];
+  const offs = tags[273], cnts = tags[279], raw = new Uint8Array(H * rowBytes);
+  for (let s = 0; s < offs.length; s++) {
+    const y0 = s * rps;
+    if (y0 >= H) break;
+    const want = Math.min(rps, H - y0) * rowBytes, src = b.subarray(offs[s], offs[s] + cnts[s]);
+    let dec;
+    if (comp === 1) dec = src;
+    else if (comp === 5) dec = lzwDecode(src, want);
+    else if (comp === 8 || comp === 32946) dec = await zlibInflate(src);
+    else if (comp === 32773) dec = packbitsDecode(src, want);
+    else throw new Error("TIFF compression " + comp + " is not supported; save as uncompressed, LZW or ZIP TIFF, or PNG");
+    raw.set(dec.subarray(0, want), y0 * rowBytes);
+  }
+  const N = W * H * spp, rv = new DataView(raw.buffer);
+  let all;
+  if (bps === 8) all = sf === 2 ? new Int8Array(raw.buffer) : raw;
+  else if (bps === 16) { all = sf === 2 ? new Int16Array(N) : new Uint16Array(N); for (let i = 0; i < N; i++) all[i] = sf === 2 ? rv.getInt16(2 * i, le) : rv.getUint16(2 * i, le); }
+  else { all = sf === 3 ? new Float32Array(N) : sf === 2 ? new Int32Array(N) : new Uint32Array(N);
+         for (let i = 0; i < N; i++) all[i] = sf === 3 ? rv.getFloat32(4 * i, le) : sf === 2 ? rv.getInt32(4 * i, le) : rv.getUint32(4 * i, le); }
+  if (pred === 2) for (let y = 0; y < H; y++) for (let x = spp; x < W * spp; x++) all[y * W * spp + x] += all[y * W * spp + x - spp];
+  let data = all;
+  if (spp > 1) { data = new all.constructor(W * H); for (let i = 0; i < W * H; i++) data[i] = all[i * spp]; }
+  return { w: W, h: H, depth: bps, channels: spp, data, all, float: sf === 3 };
+}
+
+// ---------------------------------------------------------------- raster -> labels / grey
+// A label image is used as is. A two-value (binary) mask is split into 8-connected objects.
+// A colour-coded mask gets one label per distinct colour (black = background).
+function rasterToLabels(r) {
+  const n = r.w * r.h, ch = r.channels, a = r.all, labels = new Int32Array(n);
+  let kind = "labels";
+  if (ch >= 3) {
+    const ids = new Map();
+    for (let i = 0; i < n; i++) {
+      const k = (a[i * ch] * 65536 + a[i * ch + 1]) * 65536 + a[i * ch + 2];
+      if (!k || (ch === 4 && a[i * ch + 3] === 0)) continue;
+      let id = ids.get(k);
+      if (!id) ids.set(k, id = ids.size + 1);
+      labels[i] = id;
+    }
+    kind = "colour";
+  } else for (let i = 0; i < n; i++) { const v = Math.round(a[i * ch]); labels[i] = v > 0 ? v : 0; }
+  const seen = new Set();
+  for (let i = 0; i < n && seen.size < 2; i++) if (labels[i]) seen.add(labels[i]);
+  if (seen.size === 1) {
+    const m = new Uint8Array(n);
+    for (let i = 0; i < n; i++) m[i] = labels[i] ? 1 : 0;
+    labels.set(components(m, r.w, r.h, true).lab);
+    kind = "binary";
+  }
+  let max = 0;
+  for (let i = 0; i < n; i++) if (labels[i] > max) max = labels[i];
+  return { labels, kind, max };
+}
+function rasterToGray(r) {
+  const n = r.w * r.h, ch = r.channels, a = r.all, g = new Float64Array(n);
+  for (let i = 0; i < n; i++) g[i] = ch >= 3 ? 0.299 * a[i * ch] + 0.587 * a[i * ch + 1] + 0.114 * a[i * ch + 2] : a[i * ch];
+  const out = new Uint8Array(n);
+  if (r.depth === 8 && !r.float) { for (let i = 0; i < n; i++) out[i] = g[i]; return out; }
+  let lo = Infinity, hi = -Infinity;
+  for (let i = 0; i < n; i++) if (Number.isFinite(g[i])) { if (g[i] < lo) lo = g[i]; if (g[i] > hi) hi = g[i]; }
+  const k = hi > lo ? 255 / (hi - lo) : 0;
+  for (let i = 0; i < n; i++) out[i] = Number.isFinite(g[i]) ? Math.round((g[i] - lo) * k) : 0;
+  return out;
+}
+// read just enough of a file header to tell what it is
+async function sniff(file) {
+  const h = new Uint8Array(await file.slice(0, 32).arrayBuffer());
+  if (h.length >= 26 && PNG_SIG.every((v, i) => h[i] === v)) return { fmt: "png", depth: h[24], ctype: h[25] };
+  if ((h[0] === 0x49 && h[1] === 0x49) || (h[0] === 0x4d && h[1] === 0x4d)) return { fmt: "tiff" };
+  if (h[0] === 0xff && h[1] === 0xd8) return { fmt: "jpeg" };
+  return { fmt: "other" };
+}
+function pngChunk(type, data) {
+  const out = new Uint8Array(12 + data.length), dv = new DataView(out.buffer);
+  dv.setUint32(0, data.length);
+  for (let i = 0; i < 4; i++) out[4 + i] = type.charCodeAt(i);
+  out.set(data, 8);
+  dv.setUint32(8 + data.length, crc32(out.subarray(4, 8 + data.length)));
+  return out;
+}
+async function encodePNGGray(w, h, values, depth) {
+  const bpp = depth / 8, stride = w * bpp, raw = new Uint8Array(h * (stride + 1));
+  for (let y = 0; y < h; y++) {
+    let o = y * (stride + 1) + 1;           // filter byte 0 (None)
+    for (let x = 0; x < w; x++) {
+      const v = values[y * w + x];
+      if (depth === 16) { raw[o++] = v >> 8; raw[o++] = v & 255; } else raw[o++] = v;
+    }
+  }
+  const ihdr = new Uint8Array(13), dv = new DataView(ihdr.buffer);
+  dv.setUint32(0, w); dv.setUint32(4, h); ihdr[8] = depth; ihdr[9] = 0;
+  return concatBytes([new Uint8Array(PNG_SIG), pngChunk("IHDR", ihdr),
+                      pngChunk("IDAT", await zlibDeflate(raw)), pngChunk("IEND", new Uint8Array(0))]);
+}
+
+// ---------------------------------------------------------------- ZIP (stored, no compression)
+function makeZip(files) {
+  const enc = new TextEncoder(), parts = [], central = [];
+  const d = new Date();
+  const time = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1);
+  const date = ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+  let offset = 0;
+  for (const f of files) {
+    const name = enc.encode(f.name), data = f.bytes, crc = crc32(data);
+    const lh = new Uint8Array(30 + name.length), lv = new DataView(lh.buffer);
+    lv.setUint32(0, 0x04034b50, true); lv.setUint16(4, 20, true); lv.setUint16(6, 0x0800, true);
+    lv.setUint16(8, 0, true); lv.setUint16(10, time, true); lv.setUint16(12, date, true);
+    lv.setUint32(14, crc, true); lv.setUint32(18, data.length, true); lv.setUint32(22, data.length, true);
+    lv.setUint16(26, name.length, true); lh.set(name, 30);
+    const ch = new Uint8Array(46 + name.length), cv = new DataView(ch.buffer);
+    cv.setUint32(0, 0x02014b50, true); cv.setUint16(4, 20, true); cv.setUint16(6, 20, true);
+    cv.setUint16(8, 0x0800, true); cv.setUint16(10, 0, true); cv.setUint16(12, time, true);
+    cv.setUint16(14, date, true); cv.setUint32(16, crc, true); cv.setUint32(20, data.length, true);
+    cv.setUint32(24, data.length, true); cv.setUint16(28, name.length, true); cv.setUint32(42, offset, true);
+    ch.set(name, 46);
+    parts.push(lh, data); central.push(ch);
+    offset += lh.length + data.length;
+  }
+  const cd = concatBytes(central), end = new Uint8Array(22), ev = new DataView(end.buffer);
+  ev.setUint32(0, 0x06054b50, true); ev.setUint16(8, files.length, true); ev.setUint16(10, files.length, true);
+  ev.setUint32(12, cd.length, true); ev.setUint32(16, offset, true);
+  return concatBytes([...parts, cd, end]);
+}
+
+// ---------------------------------------------------------------- CSV
+function parseCSV(text) {
+  const rows = [];
+  let row = [], cell = "", q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else q = false; }
+      else cell += c;
+    } else if (c === '"') q = true;
+    else if (c === ",") { row.push(cell); cell = ""; }
+    else if (c === "\n" || c === "\r") {
+      if (c === "\r" && text[i + 1] === "\n") i++;
+      row.push(cell); cell = "";
+      if (row.length > 1 || row[0] !== "") rows.push(row);
+      row = [];
+    } else cell += c;
+  }
+  if (cell !== "" || row.length) { row.push(cell); rows.push(row); }
+  const cols = rows.shift() || [];
+  return { cols, rows: rows.map(r => Object.fromEntries(cols.map((c, i) => [c, r[i] ?? ""]))) };
+}
+function toCSV(cols, rows) {
+  const esc = v => {
+    const s = v === null || v === undefined ? "" : String(v);
+    return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  return [cols.join(","), ...rows.map(r => cols.map(c => esc(r[c])).join(","))].join("\r\n") + "\r\n";
+}
+
+// ---------------------------------------------------------------- statistics (numpy conventions)
+function percentile(sorted, q) {
+  const pos = (sorted.length - 1) * q / 100, lo = Math.floor(pos), hi = Math.ceil(pos);
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo);
+}
+const round = (v, n) => { const f = 10 ** n; return Math.round(v * f) / f; };
+function describe(values, quartiles) {
+  if (!values.length) return null;
+  const s = [...values].sort((a, b) => a - b), n = s.length;
+  const mean = s.reduce((a, b) => a + b, 0) / n;
+  const sd = n > 1 ? Math.sqrt(s.reduce((a, b) => a + (b - mean) ** 2, 0) / (n - 1)) : 0;
+  const out = { min: s[0] };
+  if (quartiles) out.q1 = percentile(s, 25);
+  out.median = percentile(s, 50);
+  if (quartiles) out.q3 = percentile(s, 75);
+  Object.assign(out, { max: s[n - 1], mean: round(mean, 1), sd: round(sd, 1) });
+  return out;
+}
+
+// ---------------------------------------------------------------- label state + undoable operations
+const DX = [1, 1, 0, -1, -1, -1, 0, 1], DY = [0, 1, 1, 1, 0, -1, -1, -1];   // E SE S SW W NW N NE (clockwise, y down)
+
+function createState(W, H, labels) {
+  const st = { W, H, labels, objs: new Map(), nextId: 1, undo: [], redo: [], dirty: false,
+               src: { rows: new Map(), cols: null, summary: null, ids: new Set(), nSource: 0 } };
+  const acc = new Map();
+  for (let y = 0, i = 0; y < H; y++) for (let x = 0; x < W; x++, i++) {
+    const L = labels[i];
+    if (!L) continue;
+    let a = acc.get(L);
+    if (!a) acc.set(L, a = { x0: x, y0: y, x1: x + 1, y1: y + 1, area: 0, sx: 0, sy: 0 });
+    if (x < a.x0) a.x0 = x; if (x >= a.x1) a.x1 = x + 1; if (y >= a.y1) a.y1 = y + 1;
+    a.area++; a.sx += x; a.sy += y;
+  }
+  for (const [id, a] of acc) {
+    st.objs.set(id, { id, status: "original", srcId: id, note: "", x0: a.x0, y0: a.y0, x1: a.x1, y1: a.y1,
+                      area: a.area, cx: a.sx / a.area, cy: a.sy / a.area });
+    st.src.ids.add(id); st.src.nSource++;
+    if (id >= st.nextId) st.nextId = id + 1;
+  }
+  return st;
+}
+
+function beginOp(st, desc, tool) {
+  return { desc, tool, idx: [], before: [], after: [], objBefore: new Map(), objAfter: new Map(),
+           newMeta: new Map(), notes: new Map(), rect: [Infinity, Infinity, -Infinity, -Infinity], time: new Date().toISOString() };
+}
+function snapObj(st, op, id) {
+  if (id && !op.objBefore.has(id)) {
+    const o = st.objs.get(id);
+    op.objBefore.set(id, o ? { ...o } : null);
+  }
+}
+function setPx(st, op, i, v) {
+  const old = st.labels[i];
+  if (old === v) return;
+  snapObj(st, op, old); snapObj(st, op, v);
+  op.idx.push(i); op.before.push(old); op.after.push(v);
+  st.labels[i] = v;
+  const x = i % st.W, y = (i / st.W) | 0, r = op.rect;
+  if (x < r[0]) r[0] = x; if (y < r[1]) r[1] = y; if (x + 1 > r[2]) r[2] = x + 1; if (y + 1 > r[3]) r[3] = y + 1;
+}
+// Recompute bbox / area / centroid for `ids`, scanning `rect` (which must contain all their pixels).
+function rescan(st, ids, rect) {
+  const acc = new Map();
+  for (const id of ids) acc.set(id, { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity, area: 0, sx: 0, sy: 0 });
+  const { W, labels } = st;
+  for (let y = rect[1]; y < rect[3]; y++) for (let x = rect[0], i = y * W + rect[0]; x < rect[2]; x++, i++) {
+    const a = acc.get(labels[i]);
+    if (!a) continue;
+    if (x < a.x0) a.x0 = x; if (y < a.y0) a.y0 = y; if (x + 1 > a.x1) a.x1 = x + 1; if (y + 1 > a.y1) a.y1 = y + 1;
+    a.area++; a.sx += x; a.sy += y;
+  }
+  return acc;
+}
+function endOp(st, op) {
+  if (!op.idx.length) return null;
+  const r = [...op.rect];
+  for (const o of op.objBefore.values()) if (o) {
+    r[0] = Math.min(r[0], o.x0); r[1] = Math.min(r[1], o.y0); r[2] = Math.max(r[2], o.x1); r[3] = Math.max(r[3], o.y1);
+  }
+  const acc = rescan(st, op.objBefore.keys(), r);
+  for (const [id, a] of acc) {
+    const old = st.objs.get(id);
+    if (!a.area) { st.objs.delete(id); continue; }
+    const geom = { x0: a.x0, y0: a.y0, x1: a.x1, y1: a.y1, area: a.area, cx: a.sx / a.area, cy: a.sy / a.area };
+    let o;
+    if (old) {
+      o = { ...old, ...geom };
+      if (o.status === "original") o.status = "modified";
+    } else {
+      const m = op.newMeta.get(id) || {};
+      o = { id, status: "added", srcId: null, note: m.note || "", ...geom };
+    }
+    const n = op.notes.get(id);
+    if (n) o.note = o.note ? o.note + "; " + n : n;
+    st.objs.set(id, o);
+  }
+  for (const id of op.objBefore.keys()) op.objAfter.set(id, st.objs.has(id) ? { ...st.objs.get(id) } : null);
+  op.rect = r;
+  st.undo.push(op); st.redo.length = 0; st.dirty = true;
+  return r;
+}
+function restoreObjs(st, snap) {
+  for (const [id, o] of snap) { if (o) st.objs.set(id, { ...o }); else st.objs.delete(id); }
+}
+function undo(st) {
+  const op = st.undo.pop();
+  if (!op) return null;
+  for (let k = op.idx.length - 1; k >= 0; k--) st.labels[op.idx[k]] = op.before[k];
+  restoreObjs(st, op.objBefore);
+  st.redo.push(op); st.dirty = true;
+  return op;
+}
+function redo(st) {
+  const op = st.redo.pop();
+  if (!op) return null;
+  for (let k = 0; k < op.idx.length; k++) st.labels[op.idx[k]] = op.after[k];
+  restoreObjs(st, op.objAfter);
+  st.undo.push(op); st.dirty = true;
+  return op;
+}
+
+// ---------------------------------------------------------------- editing operations
+function opDelete(st, id) {
+  const o = st.objs.get(id);
+  if (!o) return null;
+  const op = beginOp(st, "delete #" + id, "delete");
+  for (let y = o.y0; y < o.y1; y++) for (let x = o.x0; x < o.x1; x++) {
+    const i = y * st.W + x;
+    if (st.labels[i] === id) setPx(st, op, i, 0);
+  }
+  return endOp(st, op) && op;
+}
+function opMerge(st, keep, absorb) {
+  const a = st.objs.get(keep), b = st.objs.get(absorb);
+  if (!a || !b || keep === absorb) return null;
+  const op = beginOp(st, "merge #" + absorb + " into #" + keep, "merge");
+  op.notes.set(keep, "merged with #" + absorb);
+  for (let y = b.y0; y < b.y1; y++) for (let x = b.x0; x < b.x1; x++) {
+    const i = y * st.W + x;
+    if (st.labels[i] === absorb) setPx(st, op, i, keep);
+  }
+  return endOp(st, op) && op;
+}
+// pixels whose centre is inside the shape; fill(i) decides what to write
+function fillDisk(st, cx, cy, r, fn) {
+  const x0 = Math.max(0, Math.floor(cx - r)), x1 = Math.min(st.W, Math.ceil(cx + r) + 1);
+  const y0 = Math.max(0, Math.floor(cy - r)), y1 = Math.min(st.H, Math.ceil(cy + r) + 1);
+  const r2 = r * r;
+  for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+    const dx = x + 0.5 - cx, dy = y + 0.5 - cy;
+    if (dx * dx + dy * dy <= r2) fn(y * st.W + x);
+  }
+}
+function fillPolygon(st, pts, fn) {
+  if (pts.length < 3) return;
+  let ymin = Infinity, ymax = -Infinity;
+  for (const [, y] of pts) { ymin = Math.min(ymin, y); ymax = Math.max(ymax, y); }
+  const y0 = Math.max(0, Math.floor(ymin)), y1 = Math.min(st.H, Math.ceil(ymax) + 1);
+  for (let y = y0; y < y1; y++) {
+    const yc = y + 0.5, xs = [];
+    for (let k = 0, j = pts.length - 1; k < pts.length; j = k++) {
+      const [xa, ya] = pts[j], [xb, yb] = pts[k];
+      if ((ya <= yc && yb > yc) || (yb <= yc && ya > yc)) xs.push(xa + (yc - ya) * (xb - xa) / (yb - ya));
+    }
+    xs.sort((a, b) => a - b);
+    for (let k = 0; k + 1 < xs.length; k += 2) {
+      const xa = Math.max(0, Math.ceil(xs[k] - 0.5)), xb = Math.min(st.W, Math.ceil(xs[k + 1] - 0.5));
+      for (let x = xa; x < xb; x++) fn(y * st.W + x);
+    }
+  }
+}
+function newObjectOp(st, desc, tool, note) {
+  const op = beginOp(st, desc, tool), id = st.nextId++;
+  op.newMeta.set(id, { note });
+  return { op, id };
+}
+function opAddDisk(st, cx, cy, r, overwrite) {
+  const { op, id } = newObjectOp(st, "", "circle", "drawn (circle)");
+  fillDisk(st, cx, cy, r, i => { if (overwrite || !st.labels[i]) setPx(st, op, i, id); });
+  op.desc = "add circle #" + id;
+  return endOp(st, op) && op;
+}
+function opAddPolygon(st, pts, overwrite) {
+  const { op, id } = newObjectOp(st, "", "lasso", "drawn (freehand)");
+  fillPolygon(st, pts, i => { if (overwrite || !st.labels[i]) setPx(st, op, i, id); });
+  op.desc = "add outline #" + id;
+  return endOp(st, op) && op;
+}
+// brush / eraser: the UI opens one op per stroke and stamps discs into it
+function stamp(st, op, cx, cy, r, target, overwrite) {
+  fillDisk(st, cx, cy, r, i => {
+    const L = st.labels[i];
+    if (target === 0) { if (L) setPx(st, op, i, 0); }
+    else if (!L || (overwrite && L !== target)) setPx(st, op, i, target);
+  });
+}
+function components(mask, w, h, conn8) {
+  // mask: Uint8Array w*h (1 = in). returns {lab: Int32Array, sizes: [..]} (label k -> sizes[k-1])
+  const lab = new Int32Array(w * h), sizes = [], stack = [];
+  for (let s = 0; s < w * h; s++) {
+    if (!mask[s] || lab[s]) continue;
+    const k = sizes.length + 1;
+    let n = 0;
+    lab[s] = k; stack.push(s);
+    while (stack.length) {
+      const i = stack.pop(), x = i % w, y = (i / w) | 0;
+      n++;
+      for (let d = 0; d < 8; d += conn8 ? 1 : 2) {
+        const nx = x + DX[d], ny = y + DY[d];
+        if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+        const j = ny * w + nx;
+        if (mask[j] && !lab[j]) { lab[j] = k; stack.push(j); }
+      }
+    }
+    sizes.push(n);
+  }
+  return { lab, sizes };
+}
+const SPLIT_MIN_PIECE = 10;
+function opSplit(st, ax, ay, bx, by) {
+  const { W, H, labels } = st;
+  const len = Math.hypot(bx - ax, by - ay), steps = Math.max(1, Math.ceil(len * 2));
+  const cut = new Map();                                   // pixel -> object it belonged to
+  for (let s = 0; s <= steps; s++) {
+    const x = ax + (bx - ax) * s / steps, y = ay + (by - ay) * s / steps;
+    fillDisk(st, x, y, 1.0, i => { if (labels[i] && !cut.has(i)) cut.set(i, labels[i]); });
+  }
+  const hit = new Set(cut.values());
+  if (!hit.size) return null;
+  const op = beginOp(st, "", "split");
+  for (const [i] of cut) setPx(st, op, i, 0);
+  const made = [];
+  for (const id of hit) {
+    const o = st.objs.get(id);                           // pre-op bbox still valid
+    const w = o.x1 - o.x0, h = o.y1 - o.y0, m = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) m[y * w + x] = labels[(y + o.y0) * W + x + o.x0] === id ? 1 : 0;
+    const { lab, sizes } = components(m, w, h, false);
+    if (sizes.length < 2) continue;
+    const order = sizes.map((n, k) => [n, k + 1]).sort((a, b) => b[0] - a[0]);
+    const newLab = new Map([[order[0][1], id]]);
+    for (const [n, k] of order.slice(1)) {
+      if (n < SPLIT_MIN_PIECE) { newLab.set(k, 0); continue; }
+      const nid = st.nextId++;
+      op.newMeta.set(nid, { note: "split from #" + id, parent: id });
+      newLab.set(k, nid); made.push(nid);
+    }
+    op.notes.set(id, "split");
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const k = lab[y * w + x], v = newLab.get(k);
+      if (k && v !== id) setPx(st, op, (y + o.y0) * W + x + o.x0, v);
+    }
+  }
+  // give the cut line back to whichever piece of the same object borders it
+  const family = new Map();
+  for (const id of hit) family.set(id, new Set([id]));
+  for (const nid of made) family.get(op.newMeta.get(nid).parent).add(nid);
+  for (let pass = 0; pass < 3; pass++) {
+    for (const [i, id] of cut) {
+      if (labels[i]) continue;
+      const x = i % W, y = (i / W) | 0, fam = family.get(id);
+      for (let d = 0; d < 8; d += 2) {
+        const nx = x + DX[d], ny = y + DY[d];
+        if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+        const v = labels[ny * W + nx];
+        if (v && fam.has(v)) { setPx(st, op, i, v); break; }
+      }
+    }
+  }
+  op.desc = made.length ? "split #" + [...hit].join(", #") + " (new #" + made.join(", #") + ")" : "cut #" + [...hit].join(", #");
+  return endOp(st, op) && op;
+}
+
+// ---------------------------------------------------------------- measurement
+// Definitions follow organoid_quant.py: perimeter is the length of the outer pixel contour of the
+// largest 8-connected piece, circularity = min(1, 4*pi*A/P^2), solidity = A / convex-hull area.
+// Axes come from image moments (as scikit-image does), not from OpenCV's fitEllipse.
+function traceContour(m, w, sx, sy) {
+  const pts = [[sx, sy]];
+  let px = sx, py = sy, back = 4, first = -1;
+  for (let it = 0; it < 8 * m.length + 16; it++) {
+    let found = -1;
+    for (let k = 1; k <= 8; k++) {
+      const d = (back + k) & 7;
+      if (m[(py + DY[d]) * w + px + DX[d]]) { found = d; break; }
+    }
+    if (found < 0) break;
+    if (px === sx && py === sy) { if (first < 0) first = found; else if (found === first) break; }
+    const bd = (found + 7) & 7, bx = px + DX[bd], by = py + DY[bd];
+    px += DX[found]; py += DY[found];
+    const ddx = bx - px, ddy = by - py;
+    for (let d = 0; d < 8; d++) if (DX[d] === ddx && DY[d] === ddy) { back = d; break; }
+    pts.push([px, py]);
+  }
+  if (pts.length > 1) { const a = pts[0], b = pts[pts.length - 1]; if (a[0] === b[0] && a[1] === b[1]) pts.pop(); }
+  return pts;
+}
+function hullArea(points) {
+  const p = [...new Set(points.map(([x, y]) => x + "," + y))].map(s => s.split(",").map(Number))
+    .sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  if (p.length < 3) return 0;
+  const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lo = [], hi = [];
+  for (const q of p) { while (lo.length > 1 && cross(lo[lo.length - 2], lo[lo.length - 1], q) <= 0) lo.pop(); lo.push(q); }
+  for (let i = p.length - 1; i >= 0; i--) { const q = p[i]; while (hi.length > 1 && cross(hi[hi.length - 2], hi[hi.length - 1], q) <= 0) hi.pop(); hi.push(q); }
+  const h = lo.slice(0, -1).concat(hi.slice(0, -1));
+  let a = 0;
+  for (let i = 0; i < h.length; i++) { const [x1, y1] = h[i], [x2, y2] = h[(i + 1) % h.length]; a += x1 * y2 - x2 * y1; }
+  return Math.abs(a) / 2;
+}
+// scikit-image's area_convex: pixels whose centre lies in the hull of the region's pixel-edge midpoints
+function hullPixelCount(m, w, h) {
+  const pts = [];
+  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+    const i = y * w + x;
+    if (m[i] && (!m[i - 1] || !m[i + 1] || !m[i - w] || !m[i + w]))
+      pts.push([x - 0.5, y], [x + 0.5, y], [x, y - 0.5], [x, y + 0.5]);
+  }
+  const p = pts.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lo = [], hi = [];
+  for (const q of p) { while (lo.length > 1 && cross(lo[lo.length - 2], lo[lo.length - 1], q) <= 0) lo.pop(); lo.push(q); }
+  for (let i = p.length - 1; i >= 0; i--) { const q = p[i]; while (hi.length > 1 && cross(hi[hi.length - 2], hi[hi.length - 1], q) <= 0) hi.pop(); hi.push(q); }
+  const hull = lo.slice(0, -1).concat(hi.slice(0, -1));
+  if (hull.length < 3) return pts.length / 4;
+  let n = 0;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    let inside = true;
+    for (let k = 0; k < hull.length && inside; k++) inside = cross(hull[k], hull[(k + 1) % hull.length], [x, y]) >= -1e-9;
+    if (inside) n++;
+  }
+  return n;
+}
+// mode "opencv" (default) follows organoid_quant.py; "skimage" uses scikit-image's solidity
+function measure(st, id, mode) {
+  const o = st.objs.get(id);
+  if (!o) return null;
+  const w = o.x1 - o.x0 + 2, h = o.y1 - o.y0 + 2, m = new Uint8Array(w * h);
+  let n = 0, sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0;
+  for (let y = o.y0; y < o.y1; y++) for (let x = o.x0; x < o.x1; x++) {
+    if (st.labels[y * st.W + x] !== id) continue;
+    m[(y - o.y0 + 1) * w + x - o.x0 + 1] = 1;
+    n++; sx += x; sy += y; sxx += x * x; syy += y * y; sxy += x * y;
+  }
+  const cx = sx / n, cy = sy / n;
+  const mxx = sxx / n - cx * cx, myy = syy / n - cy * cy, mxy = sxy / n - cx * cy;
+  const tr = (mxx + myy) / 2, det = Math.sqrt(Math.max(0, ((mxx - myy) / 2) ** 2 + mxy * mxy));
+  const major = 4 * Math.sqrt(Math.max(0, tr + det)), minor = 4 * Math.sqrt(Math.max(0, tr - det));
+  // largest 8-connected piece -> outer contour
+  const { lab, sizes } = components(m, w, h, true);
+  const big = 1 + sizes.indexOf(Math.max(...sizes));
+  let s = -1;
+  for (let i = 0; i < lab.length; i++) if (lab[i] === big) { s = i; break; }
+  const mb = new Uint8Array(w * h);
+  for (let i = 0; i < lab.length; i++) mb[i] = lab[i] === big ? 1 : 0;
+  const pts = traceContour(mb, w, s % w, (s / w) | 0);
+  let per = 0;
+  if (pts.length > 1) for (let i = 0; i < pts.length; i++) {
+    const a = pts[i], b = pts[(i + 1) % pts.length];
+    per += Math.hypot(b[0] - a[0], b[1] - a[1]);
+  }
+  const hull = mode === "skimage" ? hullPixelCount(m, w, h) : hullArea(pts);
+  return {
+    area: n, cx, cy, eqd: 2 * Math.sqrt(n / Math.PI), per,
+    circ: per > 0 ? Math.min(1, 4 * Math.PI * n / (per * per)) : 1,
+    sol: n / Math.max(hull, 1), major, minor, ar: major / Math.max(minor, 1e-6),
+  };
+}
+
+// ---------------------------------------------------------------- export
+const BASE_COLS = ["id", "centroid_x", "centroid_y", "area_px2", "eq_diameter_px", "perimeter_px", "circularity",
+                   "solidity", "minor_axis_px", "major_axis_px", "aspect_ratio", "rim_depth_gray", "rim_coverage"];
+function measuredRow(m) {
+  return {
+    centroid_x: round(m.cx, 1), centroid_y: round(m.cy, 1), area_px2: m.area, eq_diameter_px: round(m.eqd, 1),
+    perimeter_px: round(m.per, 1), circularity: round(m.circ, 3), solidity: round(m.sol, 3),
+    minor_axis_px: round(m.minor, 1), major_axis_px: round(m.major, 1), aspect_ratio: round(m.ar, 2),
+    rim_depth_gray: "", rim_coverage: "",
+  };
+}
+function measureMode(st) {
+  const m = st.src.summary && st.src.summary.method;
+  return m && /scikit-image/i.test(m) ? "skimage" : "opencv";
+}
+async function buildExport(st, { umPerPx, imageName }) {
+  const mode = measureMode(st);
+  // IDs keep the pipeline's numbering order (gaps from deletions closed, new objects appended);
+  // rows are listed largest first, as both pipelines write organoids.csv.
+  const key = o => o.srcId !== null ? o.srcId : 1e12 + o.id;
+  const byId = [...st.objs.values()].sort((a, b) => key(a) - key(b));
+  if (byId.length > 65535) throw new Error("more than 65,535 objects cannot be stored in a 16-bit mask");
+  const newId = new Map(byId.map((o, k) => [o.id, k + 1]));
+  const objs = [...byId].sort((a, b) => b.area - a.area || newId.get(a.id) - newId.get(b.id));
+  const um = umPerPx > 0 ? umPerPx : null;
+  const srcCols = (st.src.cols || BASE_COLS).filter(c => c !== "area_um2" && c !== "eq_diameter_um");
+  const cols = [...srcCols, ...(um ? ["area_um2", "eq_diameter_um"] : []), "status", "source_id", "note"];
+  const rows = objs.map(o => {
+    // untouched objects keep their ID while editing, so their saved row is found by that ID
+    const src = o.status === "original" ? st.src.rows.get(o.id) : null;
+    const r = src ? { ...src } : measuredRow(measure(st, o.id, mode));
+    r.id = newId.get(o.id);
+    r.status = o.status; r.source_id = o.srcId ?? ""; r.note = o.note;
+    if (um) {
+      r.area_um2 = round(Number(r.area_px2) * um * um, 1);
+      r.eq_diameter_um = round(Number(r.eq_diameter_px) * um, 1);
+    }
+    return r;
+  });
+  const mask = new Uint16Array(st.W * st.H), bin = new Uint8Array(st.W * st.H);
+  for (let i = 0; i < mask.length; i++) { const L = st.labels[i]; if (L) { mask[i] = newId.get(L); bin[i] = 255; } }
+  const A = rows.map(r => Number(r.area_px2)), D = rows.map(r => Number(r.eq_diameter_px));
+  const total = A.reduce((a, b) => a + b, 0);
+  const presentSrc = new Set(objs.map(o => o.srcId).filter(v => v !== null));
+  const count = s => objs.filter(o => o.status === s).length;
+  const ss = st.src.summary || {};
+  const summary = {
+    image: ss.image || imageName, image_size: [st.W, st.H],
+    ...(ss.roi_area_px2 ? { roi_area_px2: ss.roi_area_px2 } : {}),
+    n_organoids: rows.length, total_area_px2: total,
+    ...(ss.roi_area_px2 ? { pct_field_covered: round(100 * total / ss.roi_area_px2, 2) } : {}),
+    area_px2: describe(A, true), eq_diameter_px: describe(D, false), um_per_px: um,
+    ...(um ? { total_area_um2: round(total * um * um, 1) } : {}),
+    ...Object.fromEntries(["method", "roi_mode", "well", "scale_source"].filter(k => ss[k] !== undefined).map(k => [k, ss[k]])),
+    edited: {
+      tool: "organoid_editor.html", saved: new Date().toISOString(), source_method: ss.method || null,
+      measurement_convention: mode === "skimage" ? "scikit-image solidity; moment-based axes"
+                                                 : "OpenCV contour perimeter and hull; moment-based axes",
+      source_n_organoids: st.src.nSource, n_unchanged: count("original"), n_modified: count("modified"),
+      n_added: count("added"), n_deleted: Math.max(0, st.src.nSource - presentSrc.size),
+      n_edit_operations: st.undo.length,
+    },
+  };
+  const log = { image: summary.image, source_summary: st.src.summary,
+                operations: st.undo.map(op => ({ time: op.time, tool: op.tool, action: op.desc, pixels_changed: op.idx.length })),
+                id_map: objs.map(o => ({ id: newId.get(o.id), editor_id: o.id, source_id: o.srcId, status: o.status, note: o.note })) };
+  const enc = new TextEncoder();
+  return {
+    rows, cols, summary, newId,
+    files: [
+      { name: "mask_labels.png", bytes: await encodePNGGray(st.W, st.H, mask, 16) },
+      { name: "mask_binary.png", bytes: await encodePNGGray(st.W, st.H, bin, 8) },
+      { name: "organoids.csv", bytes: enc.encode(toCSV(cols, rows)) },
+      { name: "summary.json", bytes: enc.encode(JSON.stringify(summary, null, 2)) },
+      { name: "edits.json", bytes: enc.encode(JSON.stringify(log, null, 2)) },
+    ],
+  };
+}
+</script>
+
+<!-- =====================================================================
+     UI
+     ===================================================================== -->
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+let st = null;                 // label state (core)
+let gray = null;               // Uint8Array image luminance
+let baseCanvas = null, ovCanvas = null, ovImg = null;
+let imageName = "";
+const ui = { tool: "select", scale: 1, ox: 0, oy: 0, selected: 0, mergeKeep: 0, fill: 0.22, showOverlay: true,
+             showIds: true, enhance: true, thick: 2, brush: 6, overwrite: false, umPerPx: null,
+             drag: null, hover: null, space: false, listIds: [],
+             minDiam: 0, minRim: 0, hidden: new Set(), keepFilter: false };
+try { ui.keepFilter = localStorage.getItem("organoidKeepFilter") === "1"; } catch (e) {}
+
+// ---------------------------------------------------------------- toast
+let toastT = 0;
+function toast(msg, bad) {
+  const t = $("toast");
+  t.textContent = msg; t.classList.toggle("bad", !!bad); t.classList.add("show");
+  clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("show"), bad ? 6000 : 2600);
+}
+
+// ================================================================= loading
+const pending = { image: null, mask: null, csv: null, summary: null };
+const KIND_LABEL = { image: "well image", mask: "mask", csv: "measurements table", summary: "summary" };
+const MASKY = /(mask|label|seg|roi|annot)/i;
+// Decide what a file is from its name AND its content. Lower `prio` wins when two files compete.
+async function classify(file) {
+  const n = file.name.toLowerCase();
+  if (/\.csv$/.test(n)) {
+    const head = (await file.slice(0, 4096).text()).split(/\r?\n/)[0].split(",");
+    return head.includes("id") && head.includes("area_px2")
+      ? { kind: "csv", prio: n === "organoids.csv" ? 0 : 1 }
+      : { kind: null, why: "a CSV without id / area_px2 columns" };
+  }
+  if (/\.json$/.test(n)) return /summary/.test(n) ? { kind: "summary", prio: 0 } : { kind: null, why: "not a summary.json" };
+  if (/^(overlay_|size_distribution|comparison_overlay)/.test(n)) return { kind: null, why: "a pipeline picture, not an input" };
+  const s = await sniff(file);
+  if (s.fmt === "other") {
+    return /\.(bmp|webp|gif)$/.test(n) ? { kind: "image", prio: 1 } : { kind: null, why: "not an image, mask or results file" };
+  }
+  if (n === "mask_labels.png") return { kind: "mask", prio: 0 };
+  const masky = MASKY.test(n);
+  if (s.fmt === "png" && s.ctype === 0 && s.depth === 16 && !masky) return { kind: "mask", prio: 1, note: "16-bit greyscale PNG, read as a label mask" };
+  if (masky) return { kind: "mask", prio: /binary/.test(n) ? 3 : 2 };
+  return { kind: "image", prio: s.fmt === "tiff" ? 1 : 0 };
+}
+let lastDrop = [];
+async function addFiles(list, force) {
+  const report = [], changed = new Set();
+  for (const { file, depth, path } of list) {
+    const c = force ? { kind: force, prio: -1 } : await classify(file);
+    const shown = (path || file.name).replace(/^\//, "");
+    if (!c.kind) { report.push([shown, "ignored: " + c.why]); continue; }
+    // a new drop replaces older files of the same kind; within one drop the best candidate wins
+    const cur = pending[c.kind], d = depth || 0;
+    const better = !cur || c.prio < cur.prio || (c.prio === cur.prio && d < cur.depth);
+    if (force || !changed.has(c.kind) || better) {
+      pending[c.kind] = { file, depth: d, prio: c.prio, path: shown };
+      changed.add(c.kind);
+      report.push([shown, "→ " + KIND_LABEL[c.kind] + (c.note ? " (" + c.note + ")" : "")]);
+    } else report.push([shown, "not used: " + (pending[c.kind].path || pending[c.kind].file.name) + " is already the " + KIND_LABEL[c.kind]]);
+  }
+  // a new mask without its own table / summary must not be paired with the old ones
+  if (changed.has("mask")) for (const k of ["csv", "summary"]) if (!changed.has(k) && pending[k]) {
+    report.push([pending[k].path, "dropped: belonged to the previous mask"]); pending[k] = null;
+  }
+  lastDrop = report;
+  refreshSlots();
+  return changed;
+}
+function refreshSlots() {
+  for (const k of ["image", "mask", "csv", "summary"]) {
+    const el = $("slot-" + k), p = pending[k];
+    el.classList.toggle("ok", !!p);
+    el.querySelector(".dot").textContent = p ? "✓" : "";
+    el.querySelector(".file").textContent = p ? (p.path || p.file.name) + "  ·  " + (p.file.size / 1024).toFixed(0) + " KB" : el.dataset.empty;
+  }
+  $("openEditor").disabled = !pending.image;
+  $("dropReport").innerHTML = lastDrop.map(([f, w]) =>
+    `<div><span class="fname">${esc(f)}</span> <span class="${/^(ignored|not used|dropped)/.test(w) ? "warn" : "muted"}">${esc(w)}</span></div>`).join("");
+  $("startMsg").textContent = "";
+}
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+async function walkEntry(entry, depth, out) {
+  if (entry.isFile) out.push({ file: await new Promise((res, rej) => entry.file(res, rej)), depth, path: entry.fullPath });
+  else if (entry.isDirectory && depth < 3) {
+    const reader = entry.createReader();
+    let batch;
+    do {
+      batch = await new Promise((res, rej) => reader.readEntries(res, rej));
+      for (const e of batch) await walkEntry(e, depth + 1, out);
+    } while (batch.length);
+  }
+}
+async function droppedFiles(dt) {
+  const out = [], entries = [...(dt.items || [])].map(i => i.webkitGetAsEntry && i.webkitGetAsEntry()).filter(Boolean);
+  if (entries.length) for (const e of entries) await walkEntry(e, 0, out);
+  else for (const f of dt.files) out.push({ file: f, depth: 0 });
+  return out;
+}
+const editorOpen = () => !$("app").classList.contains("hidden");
+let dragDepth = 0;
+document.addEventListener("dragenter", ev => { ev.preventDefault(); if (++dragDepth === 1) document.body.classList.add("dragging"); });
+document.addEventListener("dragleave", () => { if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove("dragging"); } });
+document.addEventListener("dragover", ev => { ev.preventDefault(); ev.dataTransfer.dropEffect = "copy"; });
+document.addEventListener("drop", async ev => {
+  ev.preventDefault(); dragDepth = 0; document.body.classList.remove("dragging");
+  const files = await droppedFiles(ev.dataTransfer);
+  if (!files.length) return;
+  if (!editorOpen()) { await addFiles(files); return; }
+  // dropped onto the open editor: reload with the new files (e.g. a different mask for the same image)
+  const saved = { ...pending }, keepReport = lastDrop;
+  const changed = await addFiles(files);
+  if (!changed.size) { toast(lastDrop.map(r => r.join(" ")).join(" · ") || "Nothing usable in that drop", true); lastDrop = keepReport; return; }
+  if (st && st.dirty && !confirm("Load " + [...changed].map(k => KIND_LABEL[k]).join(" + ") + " and discard your unsaved edits?")) {
+    Object.assign(pending, saved); lastDrop = keepReport; refreshSlots(); return;
+  }
+  openEditor().catch(e => { Object.assign(pending, saved); toast(e.message, true); console.error(e); });
+});
+$("pickImage").onclick = () => $("inImage").click();
+$("pickFolder").onclick = () => $("inFolder").click();
+$("pickFiles").onclick = () => $("inFiles").click();
+for (const id of ["inImage", "inFolder", "inFiles"]) $(id).onchange = async ev => {
+  await addFiles([...ev.target.files].map(f => ({ file: f, depth: (f.webkitRelativePath || "").split("/").length - 1, path: f.webkitRelativePath })),
+                 id === "inImage" ? "image" : null);
+  ev.target.value = "";
+};
+// "Choose…" on a slot forces that file into that slot, whatever its name
+for (const k of ["image", "mask", "csv", "summary"]) {
+  const inp = $("slotIn-" + k);
+  $("slotBtn-" + k).onclick = () => inp.click();
+  inp.onchange = async () => { if (inp.files[0]) await addFiles([{ file: inp.files[0], depth: 0 }], k); inp.value = ""; };
+}
+$("clearFiles").onclick = () => { for (const k in pending) pending[k] = null; lastDrop = []; refreshSlots(); };
+$("openEditor").onclick = () => openEditor().catch(e => {
+  $("startMsg").className = "err"; $("startMsg").textContent = e.message; console.error(e);
+});
+
+const isTiff = async f => (await sniff(f)).fmt === "tiff";
+async function loadGray(file) {
+  if (await isTiff(file)) {
+    const r = await decodeTIFF(await file.arrayBuffer());
+    return { W: r.w, H: r.h, gray: rasterToGray(r), note: r.depth > 8 ? r.depth + "-bit TIFF shown rescaled to its min–max range" : "" };
+  }
+  let bmp;
+  try { bmp = await createImageBitmap(file); }
+  catch { throw new Error(`"${file.name}" could not be opened as an image`); }
+  const W = bmp.width, H = bmp.height, c = document.createElement("canvas");
+  c.width = W; c.height = H;
+  const cx = c.getContext("2d", { willReadFrequently: true });
+  cx.drawImage(bmp, 0, 0);
+  const rgba = cx.getImageData(0, 0, W, H).data, g = new Uint8Array(W * H);
+  for (let i = 0, j = 0; i < g.length; i++, j += 4) g[i] = Math.round(0.299 * rgba[j] + 0.587 * rgba[j + 1] + 0.114 * rgba[j + 2]);
+  if (bmp.close) bmp.close();                       // release the decoded image
+  c.width = c.height = 1;                           // release the scratch canvas
+  return { W, H, gray: g, note: "" };
+}
+async function loadMask(file) {
+  const buf = await file.arrayBuffer(), s = await sniff(file);
+  let r;
+  if (s.fmt === "png") r = await decodePNG(buf);
+  else if (s.fmt === "tiff") r = await decodeTIFF(buf);
+  else throw new Error(`"${file.name}" is not a PNG or TIFF, so it can't be read as a mask. Export the mask as 16-bit PNG or TIFF.`);
+  return { w: r.w, h: r.h, ...rasterToLabels(r) };
+}
+
+async function openEditor() {
+  $("startMsg").className = "muted"; $("startMsg").textContent = "Loading…";
+  const imgFile = pending.image.file;
+  const img = await loadGray(imgFile);
+  const W = img.W, H = img.H;
+  const notes = img.note ? [img.note] : [];
+
+  let labels = new Int32Array(W * H), maskKind = null;
+  if (pending.mask) {
+    const mf = pending.mask.file, m = await loadMask(mf);
+    if (m.w !== W || m.h !== H) throw new Error(`The mask "${mf.name}" is ${m.w}×${m.h} but the image "${imgFile.name}" is ${W}×${H}. Are they from the same well?`);
+    if (m.max > 65535) notes.push("mask has labels above 65,535; they will be renumbered on save");
+    labels = m.labels; maskKind = m.kind;
+    if (m.kind === "binary") notes.push(`"${mf.name}" is a black/white mask: each separate white region became one object`);
+    if (m.kind === "colour") notes.push(`"${mf.name}" is colour-coded: each colour became one object`);
+  }
+  const newState = createState(W, H, labels);
+  if (pending.summary) {
+    try { newState.src.summary = JSON.parse(await pending.summary.file.text()); } catch { notes.push("summary.json could not be read; ignored"); }
+  }
+  if (pending.csv && maskKind === "labels") {
+    const { cols, rows } = parseCSV(await pending.csv.file.text());
+    newState.src.cols = cols;
+    let mismatch = 0;
+    for (const r of rows) {
+      const id = Number(r.id), o = newState.objs.get(id);
+      if (!o || Number(r.area_px2) !== o.area) mismatch++;
+      newState.src.rows.set(id, r);
+    }
+    if (mismatch) {
+      newState.src.rows.clear(); newState.src.cols = null;
+      notes.push(`the measurements table does not match the mask (${mismatch} rows differ); every object will be measured here`);
+    } else if (cols.includes("status")) {
+      // results saved by this editor earlier: restore each object's status, pipeline ID and note
+      for (const [id, r] of newState.src.rows) {
+        const o = newState.objs.get(id);
+        if (!o) continue;
+        o.status = ["original", "modified", "added"].includes(r.status) ? r.status : "original";
+        o.srcId = r.source_id === "" || r.source_id === undefined ? null : Number(r.source_id);
+        o.note = r.note || "";
+      }
+      newState.src.cols = cols.filter(c => !["status", "source_id", "note"].includes(c));
+    }
+  }
+  const prevEdit = newState.src.summary && newState.src.summary.edited;
+  if (prevEdit && prevEdit.source_n_organoids !== undefined) newState.src.nSource = prevEdit.source_n_organoids;
+  st = newState; gray = img.gray;
+  // an image picked on its own might not be the one these results were made from
+  const expected = st.src.summary && st.src.summary.image ? st.src.summary.image.split(/[\\/]/).pop() : null;
+  imageName = imgFile.name;
+  if (expected && expected !== imgFile.name) notes.push(`these results were made from "${expected}" and you opened "${imgFile.name}"; the sizes match, so it is probably a renamed copy`);
+  ui.umPerPx = st.src.summary && st.src.summary.um_per_px ? Number(st.src.summary.um_per_px) : null;
+  $("umpx").value = ui.umPerPx || "";
+
+  // Reuse the canvas elements. A fresh pair per image (~37 MB each at 2268x4032) piles up until
+  // the browser refuses to allocate and hands back blank ones, which showed as a black image area.
+  if (!baseCanvas) {
+    baseCanvas = document.createElement("canvas"); ovCanvas = document.createElement("canvas");
+    for (const [name, cv] of [["photo", baseCanvas], ["outlines", ovCanvas]]) {
+      cv.addEventListener("contextlost", () => DIAG.lost.push(name + " lost"));
+      cv.addEventListener("contextrestored", () => { DIAG.lost.push(name + " restored"); if (st) { renderBase(); renderOverlay(); requestDraw(); } });
+    }
+  }
+  baseCanvas.width = W; baseCanvas.height = H;      // also clears them
+  ovCanvas.width = W; ovCanvas.height = H;
+  if (!ovImg || ovImg.width !== W || ovImg.height !== H) ovImg = new ImageData(W, H);
+  fillCache.clear();
+  renderBase();
+  $("start").classList.add("hidden"); $("app").classList.remove("hidden");
+  $("hdrFile").textContent = imgFile.name + "  ·  " + W + "×" + H + "  ·  " +
+    (pending.mask ? st.objs.size + " objects from " + pending.mask.file.name : "empty mask");
+  $("startMsg").textContent = "";
+  ui.selected = 0; ui.mergeKeep = 0;
+  const w = st.src.summary && st.src.summary.well;
+  ui.well = w && w.used_as_roi ? { cx: w.cx, cy: w.cy, r: w.r_floor_px } : null;
+  resize(); ui.well ? fitWell() : fit(); setTool("select");
+  if (!ui.keepFilter) { ui.minDiam = 0; ui.minRim = 0; }
+  filterRanges(); refreshFilter(false);
+  renderOverlay(); refreshPanels();
+  setTimeout(() => checkDrawn(), 250);
+  setTimeout(() => diag("opened+0.8s"), 800);
+  setTimeout(() => diag("opened+3s"), 3000);
+  if (notes.length) toast("Note: " + notes.join(" · "));
+}
+
+// ================================================================= rendering
+function renderBase() {
+  const W = st.W, H = st.H, lut = new Uint8Array(256);
+  if (ui.enhance) {
+    const hist = new Uint32Array(256);
+    let n = 0;
+    for (let i = 0; i < gray.length; i += 7) if (gray[i] > 10) { hist[gray[i]]++; n++; }
+    let lo = 0, hi = 255, c = 0;
+    for (let v = 0; v < 256; v++) { c += hist[v]; if (c < n * 0.005) lo = v; if (c < n * 0.995) hi = v; }
+    hi = Math.max(hi, lo + 8);
+    for (let v = 0; v < 256; v++) lut[v] = Math.max(0, Math.min(255, Math.round((v - lo) * 255 / (hi - lo))));
+  } else for (let v = 0; v < 256; v++) lut[v] = v;
+  const img = new ImageData(W, H), d = img.data;
+  for (let i = 0, j = 0; i < gray.length; i++, j += 4) { const g = lut[gray[i]]; d[j] = d[j + 1] = d[j + 2] = g; d[j + 3] = 255; }
+  baseCanvas.getContext("2d").putImageData(img, 0, 0);
+  requestDraw();
+}
+const STATUS_RGB = { original: [255, 59, 48], modified: [255, 159, 10], added: [52, 199, 89] };
+const fillCache = new Map();
+function fillRGB(id) {
+  let c = fillCache.get(id);
+  if (!c) {
+    const h = (id * 137.508) % 360 / 60, s = 0.65, l = 0.55, q = l + s - l * s, p = 2 * l - q;
+    const f = t => { t = (t + 6) % 6; return t < 1 ? p + (q - p) * t : t < 3 ? q : t < 4 ? p + (q - p) * (4 - t) : p; };
+    c = [f(h + 2), f(h), f(h - 2)].map(v => Math.round(v * 255));
+    fillCache.set(id, c);
+  }
+  return c;
+}
+// paint the overlay for an image-space rectangle (outlines are `thick` px wide, inside each object)
+function renderOverlayInto(img, x0, y0, x1, y1, thick, sel, alt) {
+  const { W, H, labels } = st, d = img.data, fa = Math.round(ui.fill * 255);
+  const look = new Map();
+  for (let y = y0; y < y1; y++) for (let x = x0, i = y * W + x0; x < x1; x++, i++) {
+    const L = labels[i], j = i * 4;
+    if (!L || ui.hidden.has(L)) { d[j + 3] = 0; continue; }
+    let edge = false;
+    for (let t = 1; t <= thick && !edge; t++)
+      edge = x - t < 0 || labels[i - t] !== L || x + t >= W || labels[i + t] !== L ||
+             y - t < 0 || labels[i - t * W] !== L || y + t >= H || labels[i + t * W] !== L;
+    let c = look.get(L);
+    if (!c) {
+      const o = st.objs.get(L);
+      c = { line: L === sel ? [255, 255, 255] : L === alt ? [76, 155, 255] : STATUS_RGB[o ? o.status : "added"], fill: fillRGB(L) };
+      look.set(L, c);
+    }
+    const col = edge ? c.line : c.fill;
+    d[j] = col[0]; d[j + 1] = col[1]; d[j + 2] = col[2]; d[j + 3] = edge ? 255 : fa;
+  }
+}
+function renderOverlay(rect) {
+  if (!st) return;
+  let [x0, y0, x1, y1] = rect || [0, 0, st.W, st.H];
+  const pad = ui.thick + 1;
+  x0 = Math.max(0, x0 - pad); y0 = Math.max(0, y0 - pad); x1 = Math.min(st.W, x1 + pad); y1 = Math.min(st.H, y1 + pad);
+  if (x1 <= x0 || y1 <= y0) return;
+  renderOverlayInto(ovImg, x0, y0, x1, y1, ui.thick, ui.selected, ui.mergeKeep);
+  ovCanvas.getContext("2d").putImageData(ovImg, 0, 0, x0, y0, x1 - x0, y1 - y0);
+  requestDraw();
+}
+const objRect = id => { const o = st.objs.get(id); return o ? [o.x0, o.y0, o.x1, o.y1] : null; };
+function repaintObj(id) { const r = id && objRect(id); if (r) renderOverlay(r); }
+
+const view = $("view"), vctx = view.getContext("2d");
+let drawQueued = false;
+function requestDraw() { if (!drawQueued) { drawQueued = true; requestAnimationFrame(draw); } }
+function draw() {
+  drawQueued = false;
+  if (!st) return;
+  const dpr = window.devicePixelRatio || 1, cw = view.width / dpr, ch = view.height / dpr;
+  vctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  vctx.fillStyle = "#0d0e10"; vctx.fillRect(0, 0, cw, ch);
+  vctx.imageSmoothingEnabled = ui.scale < 1;
+  const s = ui.scale;
+  vctx.drawImage(baseCanvas, ui.ox, ui.oy, st.W * s, st.H * s);
+  if (ui.showOverlay) vctx.drawImage(ovCanvas, ui.ox, ui.oy, st.W * s, st.H * s);
+  if (ui.showOverlay && ui.well) {                     // the area the pipeline analysed
+    vctx.save(); vctx.strokeStyle = "rgba(255,214,10,.85)"; vctx.lineWidth = 1.5; vctx.setLineDash([8, 6]);
+    vctx.beginPath(); vctx.arc(ui.ox + (ui.well.cx + 0.5) * s, ui.oy + (ui.well.cy + 0.5) * s, ui.well.r * s, 0, 2 * Math.PI);
+    vctx.stroke(); vctx.restore();
+  }
+  // IDs
+  if (ui.showOverlay && ui.showIds && (s >= 0.3 || st.objs.size < 300)) {
+    const fs = s >= 1.5 ? 12 : 10;
+    vctx.font = `600 ${fs}px system-ui, sans-serif`; vctx.textAlign = "center"; vctx.textBaseline = "middle";
+    vctx.lineWidth = 3; vctx.strokeStyle = "rgba(0,0,0,.85)"; vctx.fillStyle = "#fff";
+    for (const o of st.objs.values()) {
+      if (ui.hidden.has(o.id)) continue;
+      const x = ui.ox + (o.cx + 0.5) * s, y = ui.oy + (o.cy + 0.5) * s;
+      if (x < -20 || y < -20 || x > cw + 20 || y > ch + 20) continue;
+      if ((o.x1 - o.x0) * s < 9 && s < 1) continue;
+      vctx.strokeText(o.id, x, y); vctx.fillText(o.id, x, y);
+    }
+  }
+  // tool previews (screen space)
+  const d = ui.drag, toS = (x, y) => [ui.ox + x * s, ui.oy + y * s];
+  vctx.lineWidth = 1.5;
+  if (d && d.kind === "circle") {
+    const [x, y] = toS(d.x0, d.y0);
+    vctx.setLineDash([5, 4]); vctx.strokeStyle = "#34c759";
+    vctx.beginPath(); vctx.arc(x, y, d.r * s, 0, 2 * Math.PI); vctx.stroke(); vctx.setLineDash([]);
+  }
+  if (d && d.kind === "lasso" && d.pts.length > 1) {
+    vctx.strokeStyle = "#34c759"; vctx.beginPath();
+    d.pts.forEach(([x, y], k) => { const [a, b] = toS(x, y); k ? vctx.lineTo(a, b) : vctx.moveTo(a, b); });
+    vctx.closePath(); vctx.stroke();
+  }
+  if (d && d.kind === "split") {
+    vctx.strokeStyle = "#ff5a52"; vctx.setLineDash([6, 4]); vctx.beginPath();
+    vctx.moveTo(...toS(d.x0, d.y0)); vctx.lineTo(...toS(d.x1, d.y1)); vctx.stroke(); vctx.setLineDash([]);
+  }
+  if ((ui.tool === "brush" || ui.tool === "eraser") && ui.hover) {
+    const [x, y] = toS(ui.hover.x, ui.hover.y);
+    vctx.strokeStyle = ui.tool === "eraser" ? "#ff5a52" : "#34c759";
+    vctx.beginPath(); vctx.arc(x, y, Math.max(2, ui.brush * s), 0, 2 * Math.PI); vctx.stroke();
+  }
+}
+
+// ================================================================= view transform
+function resize() {
+  const dpr = window.devicePixelRatio || 1, r = view.getBoundingClientRect();
+  view.width = Math.max(1, Math.round(r.width * dpr)); view.height = Math.max(1, Math.round(r.height * dpr));
+  if (st && (ui.needFit || !viewValid()) && r.width > 2 && r.height > 2) { ui.well ? fitWell() : fit(); }
+  requestDraw();
+}
+window.addEventListener("resize", resize);
+// catches the window being restored, the sidebar reflowing, or the tab becoming visible
+if (window.ResizeObserver) new ResizeObserver(() => resize()).observe($("stage"));
+document.addEventListener("visibilitychange", () => { if (!document.hidden) resize(); });
+function setScale(s, cx, cy) {
+  s = Number.isFinite(s) ? Math.min(32, Math.max(0.05, s)) : 1;
+  const prev = Number.isFinite(ui.scale) && ui.scale > 0 ? ui.scale : s;
+  const ox = Number.isFinite(ui.ox) ? ui.ox : 0, oy = Number.isFinite(ui.oy) ? ui.oy : 0;
+  ui.ox = cx - (cx - ox) * s / prev; ui.oy = cy - (cy - oy) * s / prev; ui.scale = s;
+  const t = s < 1.2 ? 2 : 1;
+  if (t !== ui.thick) { ui.thick = t; renderOverlay(); }
+  $("stZoom").textContent = Math.round(s * 100) + " %";
+  requestDraw();
+}
+// The canvas can be 0x0 while the page is still laying out (background tab, minimised or
+// restored window). Fitting then gives a NaN transform and the image never appears, so defer.
+function viewRect() {
+  const r = view.getBoundingClientRect();
+  return r.width > 2 && r.height > 2 ? r : null;
+}
+const viewValid = () => Number.isFinite(ui.scale) && ui.scale > 0 && Number.isFinite(ui.ox) && Number.isFinite(ui.oy);
+function fit() {
+  const r = viewRect();
+  if (!r) { ui.needFit = true; return; }
+  ui.needFit = false;
+  const s = Math.min(r.width / st.W, r.height / st.H) * 0.97;
+  ui.scale = s; ui.ox = (r.width - st.W * s) / 2; ui.oy = (r.height - st.H * s) / 2;
+  setScale(s, 0, 0);
+}
+// whole-well photos: open zoomed onto the analysed well rather than the whole plate
+function fitWell() {
+  const r = viewRect(), w = ui.well;
+  if (!r || !w) { ui.needFit = true; return; }
+  ui.needFit = false;
+  const d = 2 * w.r * 1.04;
+  const s = Math.min(r.width / d, r.height / d);
+  ui.scale = s; ui.ox = r.width / 2 - (w.cx + 0.5) * s; ui.oy = r.height / 2 - (w.cy + 0.5) * s;
+  setScale(s, 0, 0);
+}
+function centerOn(id, minScale) {
+  const o = st.objs.get(id);
+  if (!o) return;
+  const r = view.getBoundingClientRect();
+  const want = Math.min(Math.max(minScale || ui.scale, ui.scale), Math.min(r.width, r.height) * 0.45 / Math.max(o.x1 - o.x0, o.y1 - o.y0, 8));
+  ui.scale = Math.max(ui.scale, Math.min(want, 8));
+  ui.ox = r.width / 2 - (o.cx + 0.5) * ui.scale; ui.oy = r.height / 2 - (o.cy + 0.5) * ui.scale;
+  setScale(ui.scale, 0, 0);
+}
+const toImg = ev => { const r = view.getBoundingClientRect(); return [(ev.clientX - r.left - ui.ox) / ui.scale, (ev.clientY - r.top - ui.oy) / ui.scale]; };
+const labelAt = (x, y) => (x >= 0 && y >= 0 && x < st.W && y < st.H) ? st.labels[(y | 0) * st.W + (x | 0)] : 0;
+
+view.addEventListener("wheel", ev => {
+  ev.preventDefault();
+  const r = view.getBoundingClientRect();
+  const k = Math.exp(-ev.deltaY * (ev.deltaMode ? 0.05 : 0.0015));
+  setScale(ui.scale * k, ev.clientX - r.left, ev.clientY - r.top);
+}, { passive: false });
+view.addEventListener("contextmenu", ev => ev.preventDefault());
+
+// ================================================================= tools
+const HINTS = {
+  select: "<b>Select</b> · click an object · drag to pan",
+  delete: "<b>Delete</b> · click an object to remove it",
+  circle: "<b>Add circle</b> · press at the centre, drag to the rim",
+  lasso: "<b>Add outline</b> · draw around the organoid, release to close",
+  brush: "<b>Brush</b> · start on an object to grow it (or on empty space to start a new one)",
+  eraser: "<b>Eraser</b> · remove pixels from any object",
+  merge: "<b>Merge</b> · click the object to keep, then the objects to absorb · Esc to restart",
+  split: "<b>Split</b> · drag a line across an object",
+};
+function setTool(t) {
+  ui.tool = t;
+  for (const b of document.querySelectorAll("#tools button")) b.classList.toggle("on", b.dataset.tool === t);
+  if (t !== "merge" && ui.mergeKeep) { const k = ui.mergeKeep; ui.mergeKeep = 0; repaintObj(k); }
+  $("toolHint").innerHTML = HINTS[t];
+  $("optBrush").classList.toggle("hidden", !(t === "brush" || t === "eraser"));
+  $("optOverwrite").classList.toggle("hidden", !(t === "brush" || t === "circle" || t === "lasso"));
+  $("toolOpts").classList.toggle("hidden", !["brush", "eraser", "circle", "lasso"].includes(t));
+  view.style.cursor = t === "select" ? "default" : "crosshair";
+  requestDraw();
+}
+for (const b of document.querySelectorAll("#tools button")) b.onclick = () => setTool(b.dataset.tool);
+
+function select(id) {
+  const prev = ui.selected;
+  ui.selected = id && st.objs.has(id) ? id : 0;
+  if (prev !== ui.selected) { repaintObj(prev); repaintObj(ui.selected); }
+  refreshSelection(); markList();
+}
+function afterEdit(op, rectOverride) {
+  if (!op) return;
+  renderOverlay(rectOverride || op.rect);
+  if (ui.selected && !st.objs.has(ui.selected)) ui.selected = 0;
+  refreshPanels();
+}
+
+view.addEventListener("pointerdown", ev => {
+  if (!st) return;
+  view.setPointerCapture(ev.pointerId);
+  const [x, y] = toImg(ev);
+  const pan = ev.button === 1 || ev.button === 2 || ui.space;
+  if (pan || (ui.tool === "select" && ev.button === 0)) {
+    ui.drag = { kind: "pan", sx: ev.clientX, sy: ev.clientY, ox: ui.ox, oy: ui.oy, moved: false, select: !pan, x, y };
+    view.style.cursor = "grabbing";
+    return;
+  }
+  if (ev.button !== 0) return;
+  const L = labelAt(x, y);
+  switch (ui.tool) {
+    case "delete":
+      if (L) { const op = opDelete(st, L); afterEdit(op); toast("Deleted #" + L); }
+      break;
+    case "merge":
+      if (!L) break;
+      if (!ui.mergeKeep || !st.objs.has(ui.mergeKeep)) { ui.mergeKeep = L; repaintObj(L); toast("Keeping #" + L + ". Now click objects to merge into it."); }
+      else if (L !== ui.mergeKeep) {
+        const r1 = objRect(ui.mergeKeep), r2 = objRect(L);
+        const op = opMerge(st, ui.mergeKeep, L);
+        afterEdit(op, [Math.min(r1[0], r2[0]), Math.min(r1[1], r2[1]), Math.max(r1[2], r2[2]), Math.max(r1[3], r2[3])]);
+        toast("Merged #" + L + " into #" + ui.mergeKeep);
+      }
+      break;
+    case "circle": ui.drag = { kind: "circle", x0: x, y0: y, r: 0 }; break;
+    case "lasso": ui.drag = { kind: "lasso", pts: [[x, y]] }; break;
+    case "split": ui.drag = { kind: "split", x0: x, y0: y, x1: x, y1: y }; break;
+    case "brush":
+    case "eraser": {
+      let target = 0, op;
+      if (ui.tool === "brush") {
+        target = L || (ui.selected && st.objs.has(ui.selected) ? ui.selected : 0);
+        if (!target) { const n = newObjectOp(st, "", "brush", "drawn (brush)"); op = n.op; target = n.id; }
+      }
+      op = op || beginOp(st, "", ui.tool);
+      ui.drag = { kind: "paint", op, target, lx: x, ly: y };
+      stamp(st, op, x, y, ui.brush, target, ui.overwrite);
+      renderOverlay([x - ui.brush - 1, y - ui.brush - 1, x + ui.brush + 2, y + ui.brush + 2].map(Math.floor));
+      break;
+    }
+  }
+});
+view.addEventListener("pointermove", ev => {
+  if (!st) return;
+  const [x, y] = toImg(ev);
+  ui.hover = { x, y };
+  const L = labelAt(x, y);
+  $("stPos").textContent = (x >= 0 && y >= 0 && x < st.W && y < st.H) ? `x ${x | 0}  y ${y | 0}  grey ${gray[(y | 0) * st.W + (x | 0)]}` : "–";
+  $("stObj").textContent = L ? "object #" + L : "";
+  const d = ui.drag;
+  if (!d) { if (ui.tool === "brush" || ui.tool === "eraser") requestDraw(); return; }
+  if (d.kind === "pan") {
+    const dx = ev.clientX - d.sx, dy = ev.clientY - d.sy;
+    if (Math.abs(dx) + Math.abs(dy) > 3) d.moved = true;
+    ui.ox = d.ox + dx; ui.oy = d.oy + dy; requestDraw();
+  } else if (d.kind === "circle") { d.r = Math.hypot(x - d.x0, y - d.y0); requestDraw(); }
+  else if (d.kind === "lasso") {
+    const [px, py] = d.pts[d.pts.length - 1];
+    if (Math.hypot(x - px, y - py) * ui.scale > 2) d.pts.push([x, y]);
+    requestDraw();
+  } else if (d.kind === "split") { d.x1 = x; d.y1 = y; requestDraw(); }
+  else if (d.kind === "paint") {
+    const steps = Math.max(1, Math.ceil(Math.hypot(x - d.lx, y - d.ly) / Math.max(1, ui.brush / 2)));
+    for (let k = 1; k <= steps; k++) stamp(st, d.op, d.lx + (x - d.lx) * k / steps, d.ly + (y - d.ly) * k / steps, ui.brush, d.target, ui.overwrite);
+    const b = ui.brush + 2;
+    renderOverlay([Math.min(x, d.lx) - b, Math.min(y, d.ly) - b, Math.max(x, d.lx) + b, Math.max(y, d.ly) + b].map(Math.floor));
+    d.lx = x; d.ly = y;
+  }
+});
+view.addEventListener("pointerup", ev => {
+  if (!st || !ui.drag) return;
+  const d = ui.drag; ui.drag = null;
+  view.style.cursor = ui.tool === "select" ? "default" : "crosshair";
+  if (d.kind === "pan") { if (d.select && !d.moved) select(labelAt(d.x, d.y)); return; }
+  if (d.kind === "circle") {
+    if (d.r * ui.scale < 3) { requestDraw(); return; }
+    const op = opAddDisk(st, d.x0, d.y0, d.r, ui.overwrite);
+    if (op) { afterEdit(op); select(op.objAfter.size ? [...op.newMeta.keys()][0] : 0); }
+    else toast("Nothing added: that area is already covered. Tick 'Overwrite neighbours' to draw over it.", true);
+  } else if (d.kind === "lasso") {
+    if (d.pts.length < 3) { requestDraw(); return; }
+    const op = opAddPolygon(st, d.pts, ui.overwrite);
+    if (op) { afterEdit(op); select([...op.newMeta.keys()][0]); }
+    else toast("Nothing added: that area is already covered. Tick 'Overwrite neighbours' to draw over it.", true);
+  } else if (d.kind === "split") {
+    const op = opSplit(st, d.x0, d.y0, d.x1, d.y1);
+    if (op) { afterEdit(op); toast(op.desc); } else requestDraw();
+  } else if (d.kind === "paint") {
+    const op = d.op;
+    op.desc = (ui.tool === "eraser" ? "erase" : "brush #" + d.target) + " (" + op.idx.length + " px)";
+    if (endOp(st, op)) {
+      afterEdit(op);
+      if (ui.tool === "brush" && st.objs.has(d.target)) select(d.target);
+    }
+  }
+  requestDraw();
+});
+
+// ================================================================= panels
+const fmt = (v, n = 0) => Number(v).toLocaleString("en-US", { minimumFractionDigits: n, maximumFractionDigits: n });
+function refreshSelection() {
+  const el = $("selInfo"), id = ui.selected;
+  if (!id || !st.objs.has(id)) { el.className = "muted"; el.textContent = "Click an object."; return; }
+  const o = st.objs.get(id), m = measure(st, id, measureMode(st)), um = ui.umPerPx;
+  const src = o.status === "original" ? st.src.rows.get(o.id) : null;
+  const rows = [
+    ["Status", `<span class="badge b-${o.status}">${o.status}</span>`],
+    ["Pipeline ID", o.srcId ?? "–"],
+    ["Area", fmt(m.area) + " px²" + (um ? " · " + fmt(m.area * um * um, 1) + " µm²" : "")],
+    ["Equiv. diameter", fmt(m.eqd, 1) + " px" + (um ? " · " + fmt(m.eqd * um, 1) + " µm" : "")],
+    ["Perimeter", fmt(src ? src.perimeter_px : m.per, 1) + " px"],
+    ["Circularity", fmt(src ? src.circularity : m.circ, 3)],
+    ["Solidity", fmt(src ? src.solidity : m.sol, 3)],
+    ["Major / minor axis", fmt(src ? src.major_axis_px : m.major, 1) + " / " + fmt(src ? src.minor_axis_px : m.minor, 1) + " px"],
+  ];
+  if (src && src.rim_depth_gray !== undefined) rows.push(["Rim depth / coverage", src.rim_depth_gray + " / " + src.rim_coverage]);
+  if (o.note) rows.push(["Note", o.note]);
+  el.className = "";
+  el.innerHTML = `<table class="kv"><tr><td style="font-size:16px;font-weight:650">#${id}</td><td></td></tr>` +
+    rows.map(([k, v]) => `<tr><td class="muted">${k}</td><td>${v}</td></tr>`).join("") + `</table>
+    <div class="row" style="margin-top:8px"><button id="selZoom">Zoom to</button><button id="selDel">Delete</button></div>` +
+    (src ? `<div class="muted" style="margin-top:6px;font-size:12px">Shape values are the pipeline's own; the editor's re-measure would differ slightly.</div>` : "");
+  $("selZoom").onclick = () => centerOn(id, 2);
+  $("selDel").onclick = () => { const op = opDelete(st, id); afterEdit(op); toast("Deleted #" + id); };
+}
+function refreshSummary() {
+  const objs = [...st.objs.values()], um = ui.umPerPx;
+  const total = objs.reduce((a, o) => a + o.area, 0);
+  const present = new Set(objs.map(o => o.srcId).filter(v => v !== null));
+  const n = s => objs.filter(o => o.status === s).length;
+  const deleted = Math.max(0, st.src.nSource - present.size);
+  const roi = st.src.summary && st.src.summary.roi_area_px2;
+  const rows = [
+    ["Organoids", `<b>${fmt(objs.length)}</b>` + (st.src.nSource ? ` <span class="muted">(pipeline: ${fmt(st.src.nSource)})</span>` : "")],
+    ["Total area", fmt(total) + " px²" + (um ? " · " + fmt(total * um * um) + " µm²" : "")],
+    ...(roi ? [["Field covered", fmt(100 * total / roi, 2) + " %"]] : []),
+    ["Unchanged / modified", fmt(n("original")) + " / " + fmt(n("modified"))],
+    ["Added / deleted", fmt(n("added")) + " / " + fmt(deleted)],
+    ...(ui.hidden.size ? [["Hidden by filter", "<span class=\"warn\">" + fmt(ui.hidden.size) + "</span>"]] : []),
+    ["Edits", fmt(st.undo.length)],
+  ];
+  $("summary").innerHTML = rows.map(([k, v]) => `<tr><td class="muted">${k}</td><td>${v}</td></tr>`).join("");
+  $("btnUndo").disabled = !st.undo.length; $("btnRedo").disabled = !st.redo.length;
+  $("btnUndo").title = st.undo.length ? "Undo: " + st.undo[st.undo.length - 1].desc + " (Ctrl+Z)" : "Undo (Ctrl+Z)";
+  $("btnRedo").title = st.redo.length ? "Redo: " + st.redo[st.redo.length - 1].desc + " (Ctrl+Y)" : "Redo (Ctrl+Y)";
+  $("stDirty").textContent = st.dirty ? "● unsaved changes" : "";
+  if (SESSION.on && SESSION.idx >= 0) {
+    const im = SESSION.data.images[SESSION.idx];
+    const hid = ui.hidden.size;
+    $("hdrFile").textContent = `${im.name}  ·  image ${SESSION.idx + 1} of ${SESSION.data.images.length}  ·  ` +
+      (hid ? `${objs.length - hid} shown of ${objs.length} objects` : `${objs.length} objects`);
+  }
+}
+function refreshList() {
+  const f = $("listFilter").value, sort = $("listSort").value;
+  let objs = [...st.objs.values()];
+  if (f === "edited") objs = objs.filter(o => o.status !== "original");
+  if (f === "original") objs = objs.filter(o => o.status === "original");
+  objs.sort(sort === "id" ? (a, b) => a.id - b.id : (a, b) => b.area - a.area || a.id - b.id);
+  ui.listIds = objs.map(o => o.id);
+  $("list").tBodies[0].innerHTML = objs.map(o =>
+    `<tr data-id="${o.id}" class="${ui.hidden.has(o.id) ? "filtered" : ""}"><td>#${o.id}</td><td class="num">${fmt(o.area)}</td><td><span class="badge b-${o.status}">${o.status}</span></td></tr>`).join("");
+  markList();
+}
+function markList() {
+  for (const tr of $("list").tBodies[0].rows) tr.classList.toggle("sel", +tr.dataset.id === ui.selected);
+  const tr = $("list").querySelector("tr.sel"), wrap = $("listWrap");
+  if (tr) {                    // scroll the list only, never the side panel
+    const head = $("list").tHead.offsetHeight, top = tr.offsetTop, bottom = top + tr.offsetHeight;
+    if (top - head < wrap.scrollTop) wrap.scrollTop = top - head;
+    else if (bottom > wrap.scrollTop + wrap.clientHeight) wrap.scrollTop = bottom - wrap.clientHeight;
+  }
+}
+$("list").tBodies[0].onclick = ev => { const tr = ev.target.closest("tr"); if (tr) { select(+tr.dataset.id); centerOn(+tr.dataset.id, 1.5); } };
+$("listFilter").onchange = $("listSort").onchange = refreshList;
+let panelT = 0;
+function refreshPanels() { refreshSummary(); refreshSelection(); clearTimeout(panelT); panelT = setTimeout(refreshList, 60); }
+function step(dir) {
+  if (!ui.listIds.length) return;
+  let k = ui.listIds.indexOf(ui.selected);
+  k = k < 0 ? (dir > 0 ? 0 : ui.listIds.length - 1) : (k + dir + ui.listIds.length) % ui.listIds.length;
+  select(ui.listIds[k]); centerOn(ui.listIds[k], 2);
+}
+
+// ---------------------------------------------------------------- size and quality filter
+// Live preview only: objects are hidden, not changed, until "Delete hidden" is pressed.
+const objDiam = o => 2 * Math.sqrt(o.area / Math.PI);
+function objRim(o) {                        // rim contrast the pipeline measured, in grey levels
+  if (o.status !== "original") return Infinity;       // drawn by hand -> never hidden
+  const r = st.src.rows.get(o.id);
+  const v = r && r.rim_depth_gray !== undefined && r.rim_depth_gray !== "" ? Number(r.rim_depth_gray) : NaN;
+  return Number.isFinite(v) ? v : Infinity;
+}
+function computeHidden() {
+  ui.hidden = new Set();
+  if (!st) return;
+  for (const o of st.objs.values())
+    if (objDiam(o) < ui.minDiam || objRim(o) < ui.minRim) ui.hidden.add(o.id);
+}
+function filterRanges() {                   // slider ends that suit this image
+  let dmax = 10, rmax = 10;
+  for (const o of st.objs.values()) {
+    dmax = Math.max(dmax, objDiam(o));
+    const r = objRim(o);
+    if (Number.isFinite(r)) rmax = Math.max(rmax, r);
+  }
+  $("minDiam").max = Math.ceil(Math.min(dmax, 200));
+  $("minRim").max = Math.ceil(Math.min(rmax, 60));
+  ui.minDiam = Math.min(ui.minDiam, +$("minDiam").max);
+  ui.minRim = Math.min(ui.minRim, +$("minRim").max);
+  $("minDiam").value = ui.minDiam; $("minRim").value = ui.minRim;
+}
+function refreshFilter(repaint = true) {
+  const um = ui.umPerPx;
+  $("minDiamVal").textContent = ui.minDiam ? (um ? fmt(ui.minDiam * um, 1) + " \u00b5m" : ui.minDiam + " px") : "off";
+  $("minRimVal").textContent = ui.minRim ? ui.minRim + " grey" : "off";
+  computeHidden();
+  const n = ui.hidden.size, total = st ? st.objs.size : 0;
+  $("filterInfo").innerHTML = n
+    ? "<b>" + fmt(total - n) + "</b> shown &middot; <span class=\"warn\">" + fmt(n) + " hidden</span><br>" +
+      "<span class=\"muted\">Hidden objects are still saved until you press \u201cDelete hidden\u201d.</span>"
+    : "Showing every object.";
+  $("filterApply").disabled = !n;
+  $("filterApply").textContent = n ? "Delete hidden (" + n + ")" : "Delete hidden";
+  if (repaint) { renderOverlay(); refreshSummary(); refreshList(); }
+}
+function opDeleteHidden(st) {               // one undoable step for the whole batch
+  const ids = [...ui.hidden].filter(id => st.objs.has(id));
+  if (!ids.length) return null;
+  const op = beginOp(st, "delete " + ids.length + " filtered object(s)", "filter");
+  const set = new Set(ids);
+  let r = [Infinity, Infinity, -Infinity, -Infinity];
+  for (const id of ids) {
+    const o = st.objs.get(id);
+    r = [Math.min(r[0], o.x0), Math.min(r[1], o.y0), Math.max(r[2], o.x1), Math.max(r[3], o.y1)];
+  }
+  for (let y = r[1]; y < r[3]; y++) for (let x = r[0]; x < r[2]; x++) {
+    const i = y * st.W + x;
+    if (set.has(st.labels[i])) setPx(st, op, i, 0);
+  }
+  return endOp(st, op) && op;
+}
+$("keepFilter").checked = ui.keepFilter;
+$("keepFilter").onchange = e => {
+  ui.keepFilter = e.target.checked;
+  try { localStorage.setItem("organoidKeepFilter", ui.keepFilter ? "1" : "0"); } catch (err) {}
+  toast(ui.keepFilter ? "Filter will stay put as you move between images."
+                      : "Filter will reset for each image.");
+};
+$("minDiam").oninput = e => { ui.minDiam = +e.target.value; refreshFilter(); };
+$("minRim").oninput = e => { ui.minRim = +e.target.value; refreshFilter(); };
+$("filterReset").onclick = () => { ui.minDiam = 0; ui.minRim = 0; filterRanges(); refreshFilter(); };
+$("filterApply").onclick = () => {
+  const n = ui.hidden.size, op = opDeleteHidden(st);
+  if (!op) return;
+  ui.minDiam = 0; ui.minRim = 0; filterRanges();
+  afterEdit(op); refreshFilter();
+  toast("Deleted " + n + " object(s) below the filter. Ctrl+Z undoes it.");
+};
+
+// ---------------------------------------------------------------- display controls
+$("showOverlay").onchange = e => { ui.showOverlay = e.target.checked; requestDraw(); };
+$("showIds").onchange = e => { ui.showIds = e.target.checked; requestDraw(); };
+$("enhance").onchange = e => { ui.enhance = e.target.checked; renderBase(); };
+$("fill").oninput = e => { ui.fill = e.target.value / 100; renderOverlay(); };
+$("brushSize").oninput = e => { ui.brush = +e.target.value; $("brushVal").textContent = ui.brush + " px"; requestDraw(); };
+$("overwrite").onchange = e => { ui.overwrite = e.target.checked; };
+$("umpx").oninput = e => { const v = parseFloat(e.target.value); ui.umPerPx = v > 0 ? v : null; refreshSummary(); refreshSelection(); };
+
+// ---------------------------------------------------------------- undo / redo
+function doUndo() { const op = undo(st); if (op) { afterEdit(op); toast("Undone: " + op.desc); } }
+function doRedo() { const op = redo(st); if (op) { afterEdit(op); toast("Redone: " + op.desc); } }
+$("btnUndo").onclick = doUndo; $("btnRedo").onclick = doRedo;
+
+// ================================================================= export
+async function overlayPNG() {
+  const c = document.createElement("canvas"); c.width = st.W; c.height = st.H;
+  const x = c.getContext("2d");
+  x.drawImage(baseCanvas, 0, 0);
+  const img = new ImageData(st.W, st.H);
+  const keepFill = ui.fill; ui.fill = 0.18;
+  renderOverlayInto(img, 0, 0, st.W, st.H, 2, 0, 0);
+  ui.fill = keepFill;
+  const t = document.createElement("canvas"); t.width = st.W; t.height = st.H;
+  t.getContext("2d").putImageData(img, 0, 0);
+  x.drawImage(t, 0, 0);
+  t.width = t.height = 1;
+  return c;
+}
+async function exportFiles() {
+  const out = await buildExport(st, { umPerPx: ui.umPerPx, imageName });
+  const c = await overlayPNG(), x = c.getContext("2d");
+  x.font = "600 13px system-ui, sans-serif"; x.textAlign = "center"; x.textBaseline = "middle";
+  x.lineWidth = 3; x.strokeStyle = "rgba(0,0,0,.85)"; x.fillStyle = "#fff";
+  for (const o of st.objs.values()) { const id = out.newId.get(o.id); x.strokeText(id, o.cx + 0.5, o.cy + 0.5); x.fillText(id, o.cx + 0.5, o.cy + 0.5); }
+  const blob = await new Promise(r => c.toBlob(r, "image/png"));
+  out.files.push({ name: "overlay_edited.png", bytes: new Uint8Array(await blob.arrayBuffer()) });
+  c.width = c.height = 1;
+  return out;
+}
+async function saveToFolder() {
+  if (!st) return;
+  if (!window.showDirectoryPicker) { toast("This browser cannot write to folders; downloading a .zip instead."); return downloadZip(); }
+  let dir;
+  try { dir = await window.showDirectoryPicker({ id: "organoid-edited", mode: "readwrite" }); }
+  catch (e) { if (e.name !== "AbortError") toast(e.message, true); return; }
+  let exists = false;
+  try { await dir.getFileHandle("mask_labels.png"); exists = true; } catch {}
+  if (exists && !confirm(`"${dir.name}" already contains results (mask_labels.png). Overwrite them?\n\nTip: make a new folder such as results_edited so the pipeline's original output is kept.`)) return;
+  try {
+    const out = await exportFiles();
+    for (const f of out.files) {
+      const h = await dir.getFileHandle(f.name, { create: true }), w = await h.createWritable();
+      await w.write(f.bytes); await w.close();
+    }
+    st.dirty = false; refreshSummary();
+    toast(`Saved ${out.rows.length} organoids to "${dir.name}" (${out.files.length} files)`);
+  } catch (e) { toast("Save failed: " + e.message, true); console.error(e); }
+}
+async function downloadZip() {
+  if (!st) return;
+  try {
+    const out = await exportFiles();
+    const zip = makeZip(out.files);
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([zip], { type: "application/zip" }));
+    a.download = imageName.replace(/\.[^.]+$/, "") + "_results_edited.zip";
+    a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    st.dirty = false; refreshSummary();
+    toast(`Downloaded ${a.download} (${out.rows.length} organoids)`);
+  } catch (e) { toast("Export failed: " + e.message, true); console.error(e); }
+}
+$("btnSave").onclick = saveToFolder;
+$("btnZip").onclick = downloadZip;
+$("btnClose").onclick = () => {
+  if (st && st.dirty && !confirm("Discard unsaved changes?")) return;
+  st = null; $("app").classList.add("hidden"); $("start").classList.remove("hidden");
+};
+window.addEventListener("beforeunload", ev => { if (st && st.dirty) { ev.preventDefault(); ev.returnValue = ""; } });
+
+// ================================================================= keyboard
+$("btnResetView").onclick = () => { if (st) { resize(); ui.well ? fitWell() : fit(); toast("View reset."); } };
+// If the image area ends up blank (a stale or impossible zoom), put it right by itself.
+// ---- diagnostics: what the browser actually drew, sent to the local server (_editor_log.jsonl)
+const DIAG = { lost: [], errors: [] };
+window.addEventListener("error", e => DIAG.errors.push(String(e.message) + " @" + e.lineno));
+window.addEventListener("unhandledrejection", e => DIAG.errors.push("promise: " + String(e.reason && e.reason.message || e.reason)));
+function brightOf(cv, ctx, n = 300) {
+  try {
+    const w = Math.min(cv.width, n), h = Math.min(cv.height, n);
+    if (w < 1 || h < 1) return -1;
+    const d = ctx.getImageData(0, 0, w, h).data; let b = 0;
+    for (let i = 0; i < d.length; i += 4) if (d[i] > 20) b++;
+    return b;
+  } catch (e) { return "err:" + e.message; }
+}
+function diag(event) {
+  if (!SESSION.on) return;
+  let baseSample = null, ovSample = null;
+  try {
+    const t = document.createElement("canvas"); t.width = 60; t.height = 60;
+    const x = t.getContext("2d");
+    if (baseCanvas) { x.drawImage(baseCanvas, 0, 0, 60, 60); baseSample = brightOf(t, x, 60); }
+    x.clearRect(0, 0, 60, 60);
+    if (ovCanvas) { x.drawImage(ovCanvas, 0, 0, 60, 60); ovSample = brightOf(t, x, 60); }
+  } catch (e) { baseSample = "err:" + e.message; }
+  const r = view.getBoundingClientRect();
+  let gmin = 255, gmax = 0;
+  if (gray) for (let i = 0; i < gray.length; i += 9973) { gmin = Math.min(gmin, gray[i]); gmax = Math.max(gmax, gray[i]); }
+  const rep = {
+    event, photo: SESSION.idx >= 0 ? SESSION.data.images[SESSION.idx].name : null, ua: navigator.userAgent,
+    dpr: window.devicePixelRatio, viewCss: [Math.round(r.width), Math.round(r.height)], viewPx: [view.width, view.height],
+    scale: ui.scale, ox: ui.ox, oy: ui.oy, well: ui.well,
+    imgSize: st ? [st.W, st.H] : null, baseCanvas: baseCanvas ? [baseCanvas.width, baseCanvas.height] : null,
+    grayRange: [gmin, gmax], viewBright: brightOf(view, vctx), baseBright: baseSample, overlayBright: ovSample,
+    showOverlay: ui.showOverlay, hidden: document.hidden, lost: DIAG.lost.slice(-5), errors: DIAG.errors.slice(-5),
+  };
+  fetch("api/log", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(rep) }).catch(() => {});
+}
+// Chrome can discard a canvas's GPU memory ("context lost"); redraw everything when it comes back.
+for (const [name, cv] of [["view", view]]) {
+  cv.addEventListener("contextlost", () => { DIAG.lost.push(name + " lost"); });
+  cv.addEventListener("contextrestored", () => { DIAG.lost.push(name + " restored"); if (st) { renderBase(); renderOverlay(); requestDraw(); } });
+}
+function checkDrawn(attempt = 0) {
+  if (!st || !ui.showOverlay && false) return;
+  requestAnimationFrame(() => {
+    let bright = 0;
+    try {
+      const d = vctx.getImageData(0, 0, Math.min(view.width, 300), Math.min(view.height, 300)).data;
+      for (let i = 0; i < d.length; i += 4) if (d[i] > 20) { bright++; if (bright > 50) break; }
+    } catch (e) { return; }
+    if (bright > 50) return;
+    if (attempt < 3) { resize(); ui.well ? fitWell() : fit(); checkDrawn(attempt + 1); }
+    else toast("The image area looks blank. Press “Reset view” (bottom left) or F.", true);
+  });
+}
+$("btnHelp").onclick = () => $("help").classList.remove("hidden");
+$("helpClose").onclick = () => $("help").classList.add("hidden");
+$("help").onclick = ev => { if (ev.target === $("help")) $("help").classList.add("hidden"); };
+const KEYTOOLS = { v: "select", d: "delete", c: "circle", l: "lasso", b: "brush", e: "eraser", m: "merge", s: "split" };
+document.addEventListener("keydown", ev => {
+  if (!st || $("app").classList.contains("hidden")) return;
+  if (ev.target instanceof Element && ev.target.matches("input[type=number], select")) return;
+  const k = ev.key.toLowerCase(), mod = ev.ctrlKey || ev.metaKey;
+  if (mod && k === "z" && !ev.shiftKey) { ev.preventDefault(); doUndo(); return; }
+  if (mod && (k === "y" || (k === "z" && ev.shiftKey))) { ev.preventDefault(); doRedo(); return; }
+  if (mod && k === "s") { ev.preventDefault(); SESSION.on ? sessionSave({}) : saveToFolder(); return; }
+  if (mod && ev.key === "Enter" && SESSION.on) { ev.preventDefault(); sessionSaveNext(); return; }
+  if (ev.altKey && SESSION.on && (ev.key === "ArrowRight" || ev.key === "ArrowLeft")) {
+    ev.preventDefault(); sessionGo(SESSION.idx + (ev.key === "ArrowRight" ? 1 : -1)); return;
+  }
+  if (mod) return;
+  if (ev.key === " ") { ui.space = true; view.style.cursor = "grab"; ev.preventDefault(); return; }
+  if (KEYTOOLS[k]) { setTool(KEYTOOLS[k]); return; }
+  if (ev.key === "Delete" || ev.key === "Backspace") { if (ui.selected) { const id = ui.selected; afterEdit(opDelete(st, id)); toast("Deleted #" + id); } return; }
+  if (ev.key === "Escape") { ui.drag = null; if (ui.mergeKeep) { const m = ui.mergeKeep; ui.mergeKeep = 0; repaintObj(m); } select(0); $("help").classList.add("hidden"); requestDraw(); return; }
+  if (k === "f") fit();
+  else if (k === "w" && ui.well) fitWell();
+  else if (k === "h") { ui.showOverlay = !ui.showOverlay; $("showOverlay").checked = ui.showOverlay; requestDraw(); }
+  else if (k === "i") { ui.showIds = !ui.showIds; $("showIds").checked = ui.showIds; requestDraw(); }
+  else if (k === "n") step(1);
+  else if (k === "p") step(-1);
+  else if (ev.key === "[" || ev.key === "]") {
+    ui.brush = Math.max(1, Math.min(60, ui.brush + (ev.key === "]" ? 1 : -1) * Math.max(1, Math.round(ui.brush / 5))));
+    $("brushSize").value = ui.brush; $("brushVal").textContent = ui.brush + " px"; requestDraw();
+  } else if (ev.key === "?") $("help").classList.remove("hidden");
+});
+document.addEventListener("keyup", ev => { if (ev.key === " ") { ui.space = false; view.style.cursor = ui.tool === "select" ? "default" : "crosshair"; } });
+
+// ================================================================= session mode (served by batch_review.py)
+// When the page comes from batch_review.py's local server, every image of the run is listed in
+// the side panel, opened straight from the results folder, and saved back into it.
+const SESSION = { on: false, data: null, idx: -1, sid: "", busy: false };
+const b64 = u8 => { let s = ""; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode(...u8.subarray(i, i + 0x8000)); return btoa(s); };
+const api = async (path, body) => {
+  const r = await fetch(path, body === undefined ? { cache: "no-store" }
+    : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+};
+async function initSession() {
+  if (!/^https?:$/.test(location.protocol)) return;
+  try { SESSION.data = await api("api/session"); } catch { return; }
+  SESSION.on = true;
+  document.body.classList.add("session");
+  $("startMsg").className = "muted"; $("startMsg").textContent = "Loading " + SESSION.data.images.length + " images…";
+  document.title = "Organoid Review";
+  const first = SESSION.data.images.findIndex(i => !i.reviewed && !i.error);
+  await sessionGo(first >= 0 ? first : 0, true);
+}
+function renderSession() {
+  const ims = SESSION.data.images, done = ims.filter(i => i.reviewed).length;
+  $("sessProgress").textContent = "· " + done + " of " + ims.length + " reviewed";
+  $("sessList").tBodies[0].innerHTML = ims.map((im, i) =>
+    `<tr data-i="${i}" class="${i === SESSION.idx ? "cur" : ""}" title="${esc(im.name)}${im.error ? " — " + esc(im.error) : ""}">` +
+    `<td>${im.reviewed ? '<span class="tick">✓</span>' : im.error ? '<span class="err-dot">!</span>' : ""}</td>` +
+    `<td class="nm">${esc(im.name)}</td>` +
+    `<td class="num">${im.error ? "error" : im.n_organoids ?? ""}</td>` +
+    `<td>${im.edited ? '<span class="badge b-modified">edited</span>' : ""}</td></tr>`).join("");
+  const cur = ims[SESSION.idx];
+  $("sessReviewed").checked = !!(cur && cur.reviewed);
+  $("sessPrev").disabled = SESSION.idx <= 0; $("sessNext").disabled = SESSION.idx >= ims.length - 1;
+  const tr = $("sessList").querySelector("tr.cur"), wrap = $("sessListWrap");
+  if (tr && (tr.offsetTop < wrap.scrollTop || tr.offsetTop + tr.offsetHeight > wrap.scrollTop + wrap.clientHeight))
+    wrap.scrollTop = tr.offsetTop - wrap.clientHeight / 2;
+}
+async function sessionGo(i, first) {
+  const ims = SESSION.data.images;
+  if (SESSION.busy || i < 0 || i >= ims.length || (i === SESSION.idx && !first)) return;
+  if (st && st.dirty && !(await sessionSave({ quiet: true }))) {
+    if (!confirm("Saving failed. Leave this image and lose its unsaved edits?")) return;
+  }
+  SESSION.busy = true;
+  try {
+    const im = ims[i], base = "files/" + encodeURIComponent(im.key) + "/";
+    const get = async (name, fname) => {
+      const r = await fetch(base + name, { cache: "no-store" });
+      return r.ok ? new File([await r.blob()], fname) : null;
+    };
+    for (const k in pending) pending[k] = null;
+    const [img, mask, csv, summ] = await Promise.all([get("image", im.name), get("mask_labels.png", "mask_labels.png"),
+                                                       get("organoids.csv", "organoids.csv"), get("summary.json", "summary.json")]);
+    if (!img) throw new Error("could not load " + im.name);
+    pending.image = { file: img, path: im.name, depth: 0, prio: 0 };
+    if (mask) pending.mask = { file: mask, path: im.key + "/mask_labels.png", depth: 1, prio: 0 };
+    if (csv) pending.csv = { file: csv, path: im.key + "/organoids.csv", depth: 1, prio: 0 };
+    if (summ) pending.summary = { file: summ, path: im.key + "/summary.json", depth: 1, prio: 0 };
+    await openEditor();
+    SESSION.idx = i;
+    SESSION.sid = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+    $("hdrFile").textContent = `${im.name}  ·  image ${i + 1} of ${ims.length}  ·  ` +
+      (mask ? st.objs.size + " objects" : "no results (" + (im.error || "not analysed") + ")");
+    if (im.error) toast("The pipeline failed on this image (" + im.error + "). You can still draw organoids by hand.", true);
+  } catch (e) { toast(e.message, true); console.error(e); }
+  finally { SESSION.busy = false; renderSession(); }
+}
+async function sessionSave({ reviewed, quiet } = {}) {
+  if (!SESSION.on || !st || SESSION.idx < 0) return false;
+  const im = SESSION.data.images[SESSION.idx];
+  try {
+    const out = await exportFiles();
+    const files = {};
+    for (const f of out.files) files[f.name] = b64(f.bytes);
+    const body = { files, session_id: SESSION.sid };
+    if (reviewed !== undefined) body.reviewed = reviewed;
+    Object.assign(im, await api("api/save/" + encodeURIComponent(im.key), body));
+    st.dirty = false; refreshSummary(); renderSession();
+    if (!quiet) toast("Saved " + im.name + " (" + out.rows.length + " organoids)");
+    return true;
+  } catch (e) { toast("Save failed: " + e.message, true); console.error(e); return false; }
+}
+async function sessionSaveNext() {
+  if (!(await sessionSave({ reviewed: true, quiet: true }))) return;
+  const ims = SESSION.data.images;
+  let j = ims.findIndex((im, k) => k > SESSION.idx && !im.reviewed);
+  if (j < 0) j = ims.findIndex(im => !im.reviewed);
+  if (j < 0) { toast("All " + ims.length + " images are reviewed. Use “Export Excel / CSV” to write the tables."); return; }
+  await sessionGo(j);
+}
+async function sessionExport() {
+  if (st && st.dirty && !(await sessionSave({ quiet: true }))) return;
+  try {
+    const r = await api("api/export", {});
+    const notReviewed = SESSION.data.images.filter(i => !i.reviewed).length;
+    $("exportBody").innerHTML =
+      `<p>${fmt(r.n_organoids)} organoids from ${r.n_images} images were written to the results folder:</p>` +
+      `<p><code>${esc(SESSION.data.results_dir)}</code></p><ul>` +
+      r.files.map(f => `<li><a href="${f.url}">${esc(f.name)}</a></li>`).join("") + `</ul>` +
+      (notReviewed ? `<p class="warn">${notReviewed} image(s) are not marked as reviewed yet; their rows say reviewed = FALSE.</p>` : "") +
+      `<p class="muted">Open <b>organoid_results.xlsx</b> in Excel. The CSV files use commas, which suits R or Python; Excel set to French may need the .xlsx.</p>`;
+    $("exportDlg").classList.remove("hidden");
+  } catch (e) { toast("Export failed: " + e.message, true); }
+}
+$("sessList").tBodies[0].onclick = ev => { const tr = ev.target.closest("tr"); if (tr) sessionGo(+tr.dataset.i); };
+$("sessPrev").onclick = () => sessionGo(SESSION.idx - 1);
+$("sessNext").onclick = () => sessionGo(SESSION.idx + 1);
+$("sessReviewed").onchange = async e => {
+  const im = SESSION.data.images[SESSION.idx];
+  try { Object.assign(im, await api("api/reviewed/" + encodeURIComponent(im.key), { reviewed: e.target.checked })); }
+  catch (err) { toast(err.message, true); }
+  renderSession();
+};
+$("btnSessSave").onclick = () => sessionSave({});
+$("btnSaveNext").onclick = sessionSaveNext;
+$("btnExport").onclick = sessionExport;
+$("exportClose").onclick = () => $("exportDlg").classList.add("hidden");
+initSession();
+</script>
+</body>
+</html>

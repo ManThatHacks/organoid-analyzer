@@ -1,0 +1,30 @@
+{
+  "image": "/tmp/claude-0/-home-user-LAbnote-book/c1080009-f9cc-5c41-981d-64903026dee7/images/1.jpg",
+  "image_size": [
+    1684,
+    1753
+  ],
+  "roi_area_px2": 2218052,
+  "n_candidates": 414,
+  "n_after_nms": 154,
+  "n_organoids": 125,
+  "total_area_px2": 157708.0,
+  "pct_field_covered": 7.11,
+  "area_px2": {
+    "min": 94.0,
+    "q1": 339.0,
+    "median": 722.0,
+    "q3": 1302.0,
+    "max": 14997.0,
+    "mean": 1261.7,
+    "sd": 2016.0
+  },
+  "eq_diameter_px": {
+    "min": 10.9,
+    "median": 30.3,
+    "mean": 34.4,
+    "max": 138.2,
+    "sd": 20.6
+  },
+  "um_per_px": null
+}

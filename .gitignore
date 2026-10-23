@@ -1,0 +1,12 @@
+# Portable Python + packages (~420 MB). Rebuild with the steps in README.md
+# (section "Moving this folder to another computer").
+_runtime/
+
+# Python caches
+__pycache__/
+*.pyc
+
+# Results produced by running the tool (they belong next to the photos, not in the repo)
+* results/
+_previous_runs/
+_editor_log.jsonl

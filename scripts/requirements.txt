@@ -1,0 +1,9 @@
+# Packages the pipeline needs. They are already installed inside _runtime\python,
+# so you only need this file when rebuilding the runtime on a new computer.
+#
+# Versions below are the ones this folder was built and tested with.
+numpy==2.5.3
+opencv-python-headless==5.0.0.93   # organoid_quant.py (needs >= 4.3 for HOUGH_GRADIENT_ALT)
+scipy==1.18.1                      # organoid_quant_skimage.py, compare_pipelines.py
+scikit-image==0.26.0               # organoid_quant_skimage.py, compare_pipelines.py
+matplotlib==3.11.2                 # plot_distribution.py only
